@@ -873,3 +873,56 @@ input[type="range"]::-moz-range-thumb {
   gap: 8px;
   margin-bottom: 12px;
 }
+
+
+.video-title-line {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.video-links {
+  display: flex;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.video-links a {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--a);
+  text-decoration: none;
+}
+
+
+.video-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #000 center / cover no-repeat;
+}
+
+.video-fallback::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.video-fallback-play {
+  position: relative;
+  z-index: 1;
+  width: 54px;
+  height: 54px;
+  padding-left: 3px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  color: #05070a;
+  font-size: 18px;
+}

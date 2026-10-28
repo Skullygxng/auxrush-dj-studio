@@ -397,8 +397,12 @@
   function loadVideos() {
     try {
       var raw = window.localStorage ? window.localStorage.getItem('auxrush.videos') : null;
-      videos = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(videos)) videos = [];
+      var stored = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(stored)) stored = [];
+      // Drop anything saved without a usable id (older formats, corrupt data).
+      videos = stored.filter(function (v) {
+        return v && typeof v.videoId === 'string' && v.videoId.length === 11;
+      });
     } catch (err) {
       videos = [];
     }
@@ -457,7 +461,8 @@
           saveVideos();
           renderLibrary();
           if (currentVideo === video) {
-            document.getElementById('videoTitle').textContent = video.title;
+            var line = document.querySelector('#videoTitle .video-title-line');
+            if (line) line.textContent = video.title;
           }
         }
       })
@@ -466,15 +471,90 @@
       });
   }
 
+  function escapeHtml(text) {
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   function playVideo(video) {
     currentVideo = video;
     var pane = document.getElementById('videoPane');
     var frame = document.getElementById('videoFrame');
+    var title = document.getElementById('videoTitle');
+    var note = document.getElementById('videoNote');
     if (!pane || !frame) return;
-    frame.innerHTML = '<iframe src="https://www.youtube.com/embed/' + video.videoId +
-      '?autoplay=1&rel=0&playsinline=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+
+    var watchUrl = 'https://www.youtube.com/watch?v=' + video.videoId;
+    var canEmbed = location.protocol === 'http:' || location.protocol === 'https:';
+
+    if (!canEmbed) {
+      // A local view (file:// or an app scheme) sends no web referer, and
+      // YouTube refuses to play embeds without one (error 153). Show the real
+      // thumbnail and point at YouTube instead of a broken frame.
+      frame.innerHTML =
+        '<div class="video-fallback" style="background-image:url(https://img.youtube.com/vi/' +
+        video.videoId + '/hqdefault.jpg)"><span class="video-fallback-play">▶</span></div>';
+      if (note) {
+        note.textContent = 'YouTube won’t play inside a local view — it needs a real web address. ' +
+          'Open the video on YouTube below, or run the app from its web URL.';
+      }
+    } else {
+      // youtube-nocookie is the embed that behaves best inside a web view, and
+      // autoplay stays off — a refused autoplay looks exactly like a dead link.
+      frame.innerHTML =
+        '<iframe src="https://www.youtube-nocookie.com/embed/' + video.videoId +
+        '?rel=0&modestbranding=1&playsinline=1" title="' + escapeHtml(video.title) +
+        '" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" ' +
+        'allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>';
+
+      var loaded = false;
+      var iframe = frame.querySelector('iframe');
+      if (iframe) {
+        iframe.addEventListener('load', function () { loaded = true; });
+      }
+
+      // Some embedded browsers refuse third-party frames outright. Rather than
+      // leaving a black rectangle, say so and point at the external link.
+      setTimeout(function () {
+        if (!loaded && currentVideo === video && note) {
+          note.textContent = 'The embedded player was blocked here — open the video on YouTube instead.';
+        }
+      }, 4000);
+    }
+
+    if (title) {
+      title.innerHTML = '';
+      var line = document.createElement('div');
+      line.className = 'video-title-line';
+      line.textContent = video.title;
+      title.appendChild(line);
+
+      var links = document.createElement('div');
+      links.className = 'video-links';
+      var open = document.createElement('a');
+      open.href = watchUrl;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.textContent = 'Open on YouTube ↗';
+      links.appendChild(open);
+      title.appendChild(links);
+    }
+
+    if (note && canEmbed) {
+      note.textContent = 'Video audio comes from YouTube and can’t be fed into the decks.';
+    }
+
     pane.classList.remove('hidden');
-    document.getElementById('videoTitle').textContent = video.title;
+    if (pane.scrollIntoView) {
+      try {
+        pane.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      } catch (err) {
+        pane.scrollIntoView();
+      }
+    }
   }
 
   function stopVideo() {

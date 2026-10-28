@@ -95,6 +95,28 @@
     results.push((ok ? 'PASS ' : 'FAIL ') + name + (detail ? ' [' + detail + ']' : ''));
   }
 
+  /** Probe whether a YouTube embed can load at all in this environment. */
+  function probeEmbeds() {
+    var probe = document.createElement('iframe');
+    probe.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;border:0';
+    probe.src = 'https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?rel=0&playsinline=1';
+
+    var settled = false;
+    probe.onload = function () {
+      settled = true;
+      console.log('LATE PASS youtube embed loaded');
+    };
+    probe.onerror = function () {
+      settled = true;
+      console.log('LATE FAIL youtube embed failed to load');
+    };
+    document.body.appendChild(probe);
+
+    setTimeout(function () {
+      if (!settled) console.log('LATE INFO youtube embed not loaded within 2s (likely blocked here)');
+    }, 1800);
+  }
+
   function report() {
     var failures = results.filter(function (r) { return r.indexOf('FAIL') === 0; }).length;
     results.forEach(function (r) { console.log(r); });
@@ -108,6 +130,7 @@
   }
 
   function test() {
+    console.log('LATE INFO origin ' + location.protocol + '//' + location.host);
     try {
       window.localStorage.removeItem('auxrush.videos');
     } catch (err) { /* ignore */ }
@@ -203,7 +226,21 @@
       check('video card added',
         document.querySelectorAll('#libraryList .vid-card').length === 1,
         'cards=' + document.querySelectorAll('#libraryList .vid-card').length);
-      check('video iframe mounted', !!document.querySelector('#videoFrame iframe'));
+
+      var iframe = document.querySelector('#videoFrame iframe');
+      var poster = document.querySelector('#videoFrame .video-fallback');
+      check('video surface mounted', !!iframe || !!poster,
+        iframe ? 'embed' : (poster ? 'poster fallback' : 'nothing'));
+      if (iframe) {
+        var src = iframe.getAttribute('src') || '';
+        check('iframe embeds the video', src.indexOf('/embed/jfKfPfyJRdk') !== -1, src.slice(0, 46));
+      } else {
+        check('fallback shows the thumbnail', !!poster);
+      }
+      check('external YouTube link present', !!document.querySelector('#videoTitle a'));
+
+      probeEmbeds();
+
       check('video tab active', document.getElementById('tabVideos').classList.contains('active'));
       document.getElementById('sheetClose').click();
       check('sheet closes', document.getElementById('sheet').classList.contains('hidden'));
