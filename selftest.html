@@ -166,6 +166,35 @@
       check('analysis', false, err.message);
     }
 
+    // Key detection must not be hijacked by a sub-bass kick: a G minor triad
+    // over a 45 Hz kick still has to read as 6A.
+    try {
+      var gsr = 44100;
+      var gn = gsr * 4;
+      var gdata = new Float32Array(gn);
+      for (var gi = 0; gi < gn; gi++) {
+        var gt = gi / gsr;
+        var triad = Math.sin(2 * Math.PI * 196 * gt) +
+                    Math.sin(2 * Math.PI * 233.08 * gt) +
+                    Math.sin(2 * Math.PI * 293.66 * gt);
+        var sinceBeat = gt % (60 / 128);
+        var kick = Math.exp(-sinceBeat * 40) * Math.sin(2 * Math.PI * 45 * gt);
+        gdata[gi] = 0.25 * triad + 0.8 * kick;
+      }
+      var gbuffer = {
+        sampleRate: gsr,
+        length: gn,
+        numberOfChannels: 2,
+        duration: 4,
+        getChannelData: function () { return gdata; }
+      };
+      var gkey = window.AuxRush.analyzeBuffer(gbuffer).key;
+      check('key survives a sub-bass kick', gkey && gkey.camelot === '6A',
+        gkey ? gkey.camelot : 'none');
+    } catch (err) {
+      check('key vs kick', false, err.message);
+    }
+
     try {
       document.getElementById('libraryBtn').click();
       document.getElementById('tabVideos').click();
@@ -196,13 +225,17 @@
 
     report();
 
-    // The built-in music path: render a short demo and analyse it.
-    window.AuxRush.renderDemo(window.AuxRush.DEMOS[0], 2).then(function (buffer) {
-      var a = window.AuxRush.analyzeBuffer(buffer);
-      console.log('LATE PASS demo rendered [' + buffer.duration.toFixed(1) + 's, ' +
-        Math.round(a.bpm) + ' bpm, ' + (a.key ? a.key.camelot : 'none') + ']');
-    }).catch(function (err) {
-      console.log('LATE FAIL demo render [' + (err && err.message ? err.message : err) + ']');
+    // The built-in music path: render a short demo of each groove, analyse it
+    // and report the key, so key detection can be checked across the set.
+    window.AuxRush.DEMOS.forEach(function (groove) {
+      window.AuxRush.renderDemo(groove, 2).then(function (buffer) {
+        var a = window.AuxRush.analyzeBuffer(buffer);
+        console.log('LATE PASS ' + groove.title + ' [' + buffer.duration.toFixed(1) + 's, ' +
+          Math.round(a.bpm) + ' bpm, key ' + (a.key ? a.key.camelot : 'none') +
+          ', energy ' + a.energy.toFixed(2) + ']');
+      }).catch(function (err) {
+        console.log('LATE FAIL ' + groove.title + ' [' + (err && err.message ? err.message : err) + ']');
+      });
     });
   }
 

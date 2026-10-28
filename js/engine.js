@@ -164,6 +164,13 @@
     var im = new Float64Array(size);
     var total = Math.floor(buffer.length / hop);
     var step = Math.max(1, Math.ceil(total / 600));
+    var binHz = sr / size;
+    // The kick's fundamental sits right on A1 (55 Hz) and would pin every
+    // track to A minor, so the analysis starts above it and only keeps tonal
+    // peaks rather than raw broadband energy.
+    var loBin = Math.max(1, Math.ceil(70 / binHz));
+    var hiBin = Math.min(size / 2 - 2, Math.floor(1400 / binHz));
+    var band = new Float64Array(hiBin - loBin + 1);
 
     for (var w = 0; w < total; w += step) {
       var start = w * hop;
@@ -175,15 +182,25 @@
         im[i] = 0;
       }
       fft(re, im);
-      for (var b = 1; b < size / 2; b++) {
-        var freq = b * sr / size;
-        if (freq < 60 || freq > 2000) continue;
-        var mag = Math.sqrt(re[b] * re[b] + im[b] * im[b]);
-        var weight = freq < 250 ? 1.4 : 1; // bass carries the key
+
+      var frameMax = 0;
+      var b;
+      for (b = loBin; b <= hiBin; b++) {
+        var m = Math.sqrt(re[b] * re[b] + im[b] * im[b]);
+        band[b - loBin] = m;
+        if (m > frameMax) frameMax = m;
+      }
+      if (frameMax <= 0) continue;
+
+      for (b = 1; b < band.length - 1; b++) {
+        var mag = band[b];
+        if (mag < frameMax * 0.08) continue;
+        if (mag <= band[b - 1] || mag < band[b + 1]) continue;
+        var freq = (loBin + b) * binHz;
         var midi = 69 + 12 * Math.log(freq / 440) / Math.LN2;
         var pc = Math.round(midi) % 12;
         if (pc < 0) pc += 12;
-        chroma[pc] += mag * mag * weight;
+        chroma[pc] += mag / frameMax;
       }
     }
 

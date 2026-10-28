@@ -186,6 +186,9 @@
         return;
       }
       var deck = deckFor(view);
+      // Creating the engine also brings the other deck's track in, so both
+      // panels keep their real BPM and key from the first tap.
+      syncDecksWithViews();
       deck.toggle();
       // Browsers can start the context suspended; nudge it on the tap and say
       // so if the platform keeps it blocked.
@@ -1530,7 +1533,9 @@
     var position = view.dragging ? view.dragPos : (deck ? deck.position() : 0);
     var playing = deck ? deck.playing : false;
     var duration = track ? track.duration : 0;
-    var bpm = deck ? deck.effectiveBPM() : (track ? track.bpm : 0);
+    // Before a deck's buffer is loaded into the engine its bpm is 0; the track
+    // carries the analysed value, so fall back to it rather than showing "--".
+    var bpm = deck && deck.bpm > 0 ? deck.effectiveBPM() : (track ? track.bpm : 0);
 
     view.panel.classList.toggle('playing', playing);
     var label = playing ? '❚❚' : '▶';
