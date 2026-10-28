@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a0a0f">
+<title>AuxRush self test</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="brand-a">AUXRUSH</span><span class="brand-b">SELF TEST</span></div>
+    <div class="top-actions">
+      <button id="recordBtn" class="icon-btn" aria-label="Record"><span class="record-dot"></span></button>
+      <button id="libraryBtn" class="icon-btn" aria-label="Library">MENU</button>
+    </div>
+  </header>
+
+  <main class="mixer">
+    <section class="deck-slot" data-deck="a"></section>
+    <section class="strip">
+      <div class="strip-block">
+        <div class="crossfader-row">
+          <span class="cross-label a">A</span>
+          <input id="crossfader" class="crossfader" type="range" min="0" max="1" step="0.005" value="0.5">
+          <span class="cross-label b">B</span>
+        </div>
+      </div>
+      <div class="strip-block">
+        <div class="strip-row">
+          <button id="autoDJBtn" class="btn auto">AUTO DJ</button>
+          <div id="autoNext" class="auto-next">Off</div>
+          <div class="master">
+            <div class="master-top"><span>MASTER</span><span id="masterLevelText">-inf</span></div>
+            <input id="masterVolume" class="master-volume" type="range" min="0" max="1" step="0.01" value="0.85">
+            <div class="master-meter" id="masterMeter"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="deck-slot" data-deck="b"></section>
+  </main>
+</div>
+
+<div id="sheet" class="sheet hidden" aria-label="Library">
+  <div class="sheet-head">
+    <div class="sheet-title">Library</div>
+    <button id="sheetClose" class="icon-btn" aria-label="Close">X</button>
+  </div>
+  <div class="sheet-body">
+    <div class="lib-tools">
+      <div class="lib-tabs">
+        <button id="tabMix" class="lib-tab active">Mix</button>
+        <button id="tabVideos" class="lib-tab">Videos</button>
+      </div>
+      <input id="libSearch" class="lib-search" type="search" placeholder="Search">
+    </div>
+    <div id="videoPane" class="video-pane hidden">
+      <div class="video-frame" id="videoFrame"></div>
+      <div class="video-meta">
+        <div id="videoTitle" class="video-title">Pick a video</div>
+        <div class="video-note">Video audio can't be mixed.</div>
+      </div>
+    </div>
+    <div id="addVideoRow" class="add-video hidden">
+      <input id="videoUrl" class="lib-search" type="url" placeholder="Paste a YouTube link">
+      <button id="addVideoBtn" class="btn ghost">Add</button>
+    </div>
+    <div id="libraryList" class="library-grid"></div>
+    <div id="recordingsBlock" class="recordings hidden">
+      <div class="recordings-title">Recordings</div>
+      <div id="recordingsList" class="recordings-list"></div>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <label class="btn ghost" for="fileInput">+ Import audio</label>
+    <input id="fileInput" type="file" accept="audio/*" multiple hidden>
+    <span class="hint" id="libHint">Built-in tracks</span>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var results = [];
+
+  function check(name, ok, detail) {
+    results.push((ok ? 'PASS ' : 'FAIL ') + name + (detail ? ' [' + detail + ']' : ''));
+  }
+
+  function report() {
+    var failures = results.filter(function (r) { return r.indexOf('FAIL') === 0; }).length;
+    results.forEach(function (r) { console.log(r); });
+    document.title = 'SELFTEST ' + (results.length - failures) + '/' + results.length + ' OK';
+
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;inset:0;z-index:999;background:#0b0b12;color:#f3f4f8;' +
+      'font:12px/1.6 ui-monospace,SFMono-Regular,monospace;padding:16px;white-space:pre-wrap;overflow:auto';
+    box.textContent = (failures ? 'FAILURES: ' + failures + '\n\n' : 'ALL CHECKS PASSED\n\n') + results.join('\n');
+    document.body.appendChild(box);
+  }
+
+  function test() {
+    try {
+      window.localStorage.removeItem('auxrush.videos');
+    } catch (err) { /* ignore */ }
+    try {
+      if (window.AuxRushApp && window.AuxRushApp.clearVideos) window.AuxRushApp.clearVideos();
+    } catch (err) { /* ignore */ }
+
+    try {
+      check('two deck shells', document.querySelectorAll('.deck').length === 2,
+        document.querySelectorAll('.deck').length + ' found');
+      check('two play buttons', document.querySelectorAll('.btn.play').length === 2);
+      check('two waveforms', document.querySelectorAll('canvas.wave').length === 2);
+      check('engine exposed', !!window.AuxRushApp);
+    } catch (err) {
+      check('ui checks', false, err.message);
+    }
+
+    try {
+      var sr = 44100;
+      var secs = 8;
+      var n = sr * secs;
+      var data = new Float32Array(n);
+      var beatSeconds = 60 / 124;
+      var seed = 12345;
+      for (var i = 0; i < n; i++) {
+        var t = i / sr;
+        // 50 ms percussive burst on every beat, silence in between
+        var since = t % beatSeconds;
+        var v = 0;
+        if (since < 0.05) {
+          seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+          var noise = (seed / 0x7fffffff) * 2 - 1;
+          v = noise * Math.exp(-since * 60);
+        }
+        // quiet A minor pad underneath (A3, C4, E4)
+        v += 0.06 * (Math.sin(2 * Math.PI * 220 * t) +
+                     Math.sin(2 * Math.PI * 261.63 * t) +
+                     Math.sin(2 * Math.PI * 329.63 * t));
+        data[i] = v;
+      }
+      var fakeBuffer = {
+        sampleRate: sr,
+        length: n,
+        numberOfChannels: 2,
+        duration: secs,
+        getChannelData: function () { return data; }
+      };
+      var analysis = window.AuxRush.analyzeBuffer(fakeBuffer);
+      check('bpm detected', Math.abs(analysis.bpm - 124) < 6, 'got ' + analysis.bpm.toFixed(1));
+      check('key detected A minor', analysis.key && analysis.key.camelot === '8A',
+        analysis.key ? analysis.key.camelot : 'none');
+      check('energy measured', typeof analysis.energy === 'number' && analysis.energy > 0.05,
+        String(analysis.energy));
+      check('outro found', analysis.mixOut > 0, 'mixOut=' + analysis.mixOut.toFixed(1));
+    } catch (err) {
+      check('analysis', false, err.message);
+    }
+
+    try {
+      document.getElementById('libraryBtn').click();
+      document.getElementById('tabVideos').click();
+      document.getElementById('videoUrl').value = 'https://youtu.be/jfKfPfyJRdk';
+      document.getElementById('addVideoBtn').click();
+      check('video card added',
+        document.querySelectorAll('#libraryList .vid-card').length === 1,
+        'cards=' + document.querySelectorAll('#libraryList .vid-card').length);
+      check('video iframe mounted', !!document.querySelector('#videoFrame iframe'));
+      check('video tab active', document.getElementById('tabVideos').classList.contains('active'));
+      document.getElementById('sheetClose').click();
+      check('sheet closes', document.getElementById('sheet').classList.contains('hidden'));
+    } catch (err) {
+      check('library', false, err.message);
+    }
+
+    try {
+      var st0 = window.AuxRushApp.status();
+      check('starts without audio context', st0.hasContext === false, st0.contextState);
+      document.getElementById('autoDJBtn').click();
+      var st = window.AuxRushApp.status();
+      check('auto dj armed', st.autoDJ === true);
+      check('audio context created', st.hasContext === true, st.contextState);
+      check('decks built in engine', !!st.decks);
+    } catch (err) {
+      check('auto dj', false, err.message);
+    }
+
+    report();
+
+    // The built-in music path: render a short demo and analyse it.
+    window.AuxRush.renderDemo(window.AuxRush.DEMOS[0], 2).then(function (buffer) {
+      var a = window.AuxRush.analyzeBuffer(buffer);
+      console.log('LATE PASS demo rendered [' + buffer.duration.toFixed(1) + 's, ' +
+        Math.round(a.bpm) + ' bpm, ' + (a.key ? a.key.camelot : 'none') + ']');
+    }).catch(function (err) {
+      console.log('LATE FAIL demo render [' + (err && err.message ? err.message : err) + ']');
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', function () { setTimeout(test, 0); });
+  } else {
+    setTimeout(test, 0);
+  }
+})();
+</script>
+</body>
+</html>

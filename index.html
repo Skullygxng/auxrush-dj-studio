@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a0f">
+<title>AuxRush DJ Studio</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="brand-a">AUXRUSH</span><span class="brand-b">DJ STUDIO</span></div>
+    <div class="top-actions">
+      <button id="recordBtn" class="icon-btn" title="Record set" aria-label="Record set">
+        <span class="record-dot"></span>
+      </button>
+      <button id="libraryBtn" class="icon-btn" title="Library" aria-label="Open library">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="mixer">
+    <section class="deck-slot" data-deck="a"></section>
+
+    <section class="strip">
+      <div class="strip-block">
+        <div class="crossfader-row">
+          <span class="cross-label a">A</span>
+          <input id="crossfader" class="crossfader" type="range" min="0" max="1" step="0.005" value="0.5" aria-label="Crossfader">
+          <span class="cross-label b">B</span>
+        </div>
+      </div>
+
+      <div class="strip-block">
+        <div class="strip-row">
+          <button id="autoDJBtn" class="btn auto">AUTO DJ</button>
+          <div id="autoNext" class="auto-next">Off · tap to run the set</div>
+          <div class="master">
+            <div class="master-top">
+              <span>MASTER</span>
+              <span id="masterLevelText">-∞</span>
+            </div>
+            <input id="masterVolume" class="master-volume" type="range" min="0" max="1" step="0.01" value="0.85" aria-label="Master volume">
+            <div class="master-meter" id="masterMeter"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="deck-slot" data-deck="b"></section>
+  </main>
+</div>
+
+<div id="sheet" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Library">
+  <div class="sheet-head">
+    <div class="sheet-title">Library</div>
+    <button id="sheetClose" class="icon-btn" aria-label="Close">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div class="lib-tools">
+      <div class="lib-tabs">
+        <button id="tabMix" class="lib-tab active">Mix</button>
+        <button id="tabVideos" class="lib-tab">Videos</button>
+      </div>
+      <input id="libSearch" class="lib-search" type="search" placeholder="Search title, artist, key" aria-label="Search library">
+    </div>
+
+    <div id="videoPane" class="video-pane hidden">
+      <div class="video-frame" id="videoFrame"></div>
+      <div class="video-meta">
+        <div id="videoTitle" class="video-title">Pick a video</div>
+        <div class="video-note">Video audio comes from YouTube and can't be fed into the decks — it plays as a video, not as a track.</div>
+      </div>
+    </div>
+
+    <div id="addVideoRow" class="add-video hidden">
+      <input id="videoUrl" class="lib-search" type="url" placeholder="Paste a YouTube link to add it" aria-label="YouTube link">
+      <button id="addVideoBtn" class="btn ghost">Add</button>
+    </div>
+
+    <div id="libraryList" class="library-grid"></div>
+
+    <div id="recordingsBlock" class="recordings hidden">
+      <div class="recordings-title">Recordings</div>
+      <div id="recordingsList" class="recordings-list"></div>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <label class="btn ghost" for="fileInput">+ Import audio</label>
+    <input id="fileInput" type="file" accept="audio/*" multiple hidden>
+    <span class="hint" id="libHint">Built-in tracks · tap Deck A or Deck B</span>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
