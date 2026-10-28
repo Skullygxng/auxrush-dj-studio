@@ -729,7 +729,9 @@
         });
         index++;
         renderLibrary();
-        if (index === 2) autoLoadStarters();
+        // Idempotent: fills any deck that still has no track, whatever order
+        // the grooves finish rendering in.
+        autoLoadStarters();
         setTimeout(next, 0);
       }).catch(function (err) {
         if (window.console) console.error(err);
