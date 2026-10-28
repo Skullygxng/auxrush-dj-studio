@@ -238,6 +238,21 @@
         check('fallback shows the thumbnail', !!poster);
       }
       check('external YouTube link present', !!document.querySelector('#videoTitle a'));
+      var openLink = document.querySelector('#videoTitle a');
+      check('link opens the right video',
+        !!openLink && openLink.href.indexOf('watch?v=jfKfPfyJRdk') !== -1,
+        openLink ? openLink.href : 'none');
+      check('player pane visible', !document.getElementById('videoPane').classList.contains('hidden'));
+
+      // Does the YouTube thumbnail actually resolve from this device?
+      var thumb = new Image();
+      thumb.onload = function () {
+        console.log('LATE PASS thumbnail loaded [' + thumb.naturalWidth + 'x' + thumb.naturalHeight + ']');
+      };
+      thumb.onerror = function () {
+        console.log('LATE FAIL thumbnail failed to load');
+      };
+      thumb.src = 'https://img.youtube.com/vi/jfKfPfyJRdk/hqdefault.jpg';
 
       probeEmbeds();
 
