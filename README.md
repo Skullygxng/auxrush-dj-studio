@@ -5,14 +5,26 @@ dependencies: open `index.html`.
 
 ## Decks
 
-Each deck has play/pause, cue, tempo sync, 1/2/4/8-beat loops, four hot cues (tap to set,
-press and hold to clear), a scrubable scrolling waveform with beat grid, 3-band EQ, a
-sweep filter, channel volume and pitch.
+Each deck has play/pause, a CDJ-style cue button, tempo sync that also lines the
+beats up, 1/2/4/8-beat loops, four beat-snapped hot cues (tap to set, press and
+hold to clear), a scrubable scrolling waveform with beat grid, 3-band EQ that
+sweeps to a full low cut, a sweep filter, channel volume, pitch and an
+interactive jog wheel — drag the platter while a deck is playing to pitch-bend
+it up to ±30% and ride a beat into phase, releasing snaps back to tempo.
+
+CUE behaves like a CDJ: while playing, a press jumps back to the cue point and
+keeps going; while paused, holding plays a preview from the cue and releasing
+snaps back to it, paused.
 
 ## Mixer
 
-Crossfader, master volume with a live LED meter, and set recording — the record dot
-captures the master bus and the library lists recordings for download.
+Crossfader, master volume with a live LED meter, and set recording — the record
+dot captures the master bus and the library lists recordings for download.
+
+The strip also carries a BEATS phase meter: with both decks playing it reads
+**IN PHASE** when their kicks land together, or **A AHEAD / B AHEAD** naming
+which deck is early — nudge that deck's jog wheel until it locks. SYNC stays
+lit on any deck riding a matched tempo.
 
 ## Library
 

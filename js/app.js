@@ -104,11 +104,11 @@
           '<label class="knob"><span>FILTER</span>' +
             '<input type="range" class="f-filter" min="-1" max="1" step="0.01" value="0"></label>' +
           '<label class="knob"><span>LOW</span>' +
-            '<input type="range" class="f-low" min="-12" max="12" step="0.5" value="0"></label>' +
+            '<input type="range" class="f-low" min="-30" max="12" step="0.5" value="0"></label>' +
           '<label class="knob"><span>MID</span>' +
-            '<input type="range" class="f-mid" min="-12" max="12" step="0.5" value="0"></label>' +
+            '<input type="range" class="f-mid" min="-30" max="12" step="0.5" value="0"></label>' +
           '<label class="knob"><span>HIGH</span>' +
-            '<input type="range" class="f-high" min="-12" max="12" step="0.5" value="0"></label>' +
+            '<input type="range" class="f-high" min="-30" max="12" step="0.5" value="0"></label>' +
           '<label class="fader"><span>VOL</span>' +
             '<input type="range" class="f-vol" min="0" max="1" step="0.01" value="1"></label>' +
           '<div class="deck-meter"><div class="deck-meter-fill"></div></div>' +
@@ -134,6 +134,7 @@
       hubBpm: panel.querySelector('.hub-bpm'),
       ring: panel.querySelector('.platter-ring'),
       canvas: panel.querySelector('.wave'),
+      platter: panel.querySelector('.platter'),
       playBtn: panel.querySelector('.btn.play'),
       cueBtn: panel.querySelector('.btn.cue'),
       syncBtn: panel.querySelector('.btn.sync'),
@@ -203,20 +204,44 @@
       }
     });
 
-    view.cueBtn.addEventListener('click', function () {
+    // CUE behaves like a CDJ: while playing, a press jumps back to the cue
+    // point and keeps going; while paused, holding plays a preview from the
+    // cue and releasing snaps back to it.
+    var cueWasPlaying = false;
+
+    function cueTime() {
+      var cue = view.track.cues[0];
+      return cue != null ? cue : 0;
+    }
+
+    view.cueBtn.addEventListener('pointerdown', function () {
       if (!view.track) return;
       var deck = deckFor(view);
-      var cue = view.track.cues[0];
-      deck.seek(cue != null ? cue : 0);
+      cueWasPlaying = deck.playing;
+      if (deck.playing) {
+        deck.seek(cueTime());
+      } else {
+        deck.playAt(cueTime());
+      }
     });
+
+    function releaseCue() {
+      if (!view.track || cueWasPlaying) return;
+      var deck = deckFor(view);
+      deck.pause();
+      deck.seek(cueTime());
+    }
+
+    view.cueBtn.addEventListener('pointerup', releaseCue);
+    view.cueBtn.addEventListener('pointercancel', releaseCue);
 
     view.syncBtn.addEventListener('click', function () {
       var deck = deckFor(view);
       var other = engine.decks[view.id === 'a' ? 'b' : 'a'];
-      deck.syncTo(other);
+      // Sync matches tempo AND, while both decks are running, lines the beats
+      // up so the kicks land together — the part that makes it feel real.
+      deck.syncTo(other, true);
       view.pitch.value = String(((deck.rate - 1) * 100).toFixed(1));
-      view.syncBtn.classList.add('on');
-      setTimeout(function () { view.syncBtn.classList.remove('on'); }, 900);
     });
 
     view.loopChips.forEach(function (chip, index) {
@@ -267,6 +292,35 @@
       });
     });
 
+    // Jog wheel: dragging the platter nudges the deck faster or slower while
+    // the finger is down — the tool for riding a beat into phase by ear.
+    var jog = null;
+
+    view.platter.style.touchAction = 'none';
+
+    view.platter.addEventListener('pointerdown', function (event) {
+      if (!view.track) return;
+      var deck = engine.decks ? engine.decks[view.id] : null;
+      if (!deck || !deck.playing) return;
+      jog = { startX: event.clientX, deck: deck };
+      try { view.platter.setPointerCapture(event.pointerId); } catch (err) { /* older browsers */ }
+    });
+
+    view.platter.addEventListener('pointermove', function (event) {
+      if (!jog) return;
+      var dx = event.clientX - jog.startX;
+      jog.deck.setBend(window.AuxRush.clamp(dx * 0.35, -30, 30));
+    });
+
+    function endJog() {
+      if (!jog) return;
+      jog.deck.setBend(0);
+      jog = null;
+    }
+
+    view.platter.addEventListener('pointerup', endJog);
+    view.platter.addEventListener('pointercancel', endJog);
+
     var canvas = view.canvas;
 
     canvas.addEventListener('pointerdown', function (event) {
@@ -309,6 +363,13 @@
     return window.AuxRush.clamp(t, 0, Math.max(0, duration - 0.05));
   }
 
+  /** Snaps a position onto the nearest beat of the loaded track's grid. */
+  function snapToBeat(deck, t) {
+    if (!deck.bpm) return t;
+    var beat = 60 / deck.bpm;
+    return Math.round(t / beat) * beat;
+  }
+
   function jumpOrSetCue(view, index) {
     if (!view.track) return;
     var deck = deckFor(view);
@@ -316,7 +377,7 @@
     if (cues[index] != null) {
       deck.seek(view.track.cues[index]);
     } else {
-      view.track.cues[index] = deck.position();
+      view.track.cues[index] = snapToBeat(deck, deck.position());
       updateCueButtons(view);
       toast('Cue ' + (index + 1) + ' set');
     }
@@ -492,14 +553,16 @@
 
     if (!canEmbed) {
       // A local view (file:// or an app scheme) sends no web referer, and
-      // YouTube refuses to play embeds without one (error 153). Show the real
-      // thumbnail and point at YouTube instead of a broken frame.
+      // YouTube refuses to play embeds without one (error 153). The artwork
+      // itself is the link: tapping it opens the video on YouTube, where it
+      // plays for real.
       frame.innerHTML =
-        '<div class="video-fallback" style="background-image:url(https://img.youtube.com/vi/' +
-        video.videoId + '/hqdefault.jpg)"><span class="video-fallback-play">▶</span></div>';
+        '<a class="video-fallback" style="background-image:url(https://img.youtube.com/vi/' +
+        video.videoId + '/hqdefault.jpg)" href="' + watchUrl +
+        '" target="_blank" rel="noopener"><span class="video-fallback-play">▶</span></a>';
       if (note) {
-        note.textContent = 'YouTube won’t play inside a local view — it needs a real web address. ' +
-          'Open the video on YouTube below, or run the app from its web URL.';
+        note.textContent = 'YouTube won’t play inside a local view — tap the artwork to open ' +
+          video.title + ' on YouTube, or run the app from its web URL for embedded playback.';
       }
     } else {
       // youtube-nocookie is the embed that behaves best inside a web view, and
@@ -692,6 +755,14 @@
     play.textContent = 'Play';
     play.addEventListener('click', function () { playVideo(video); });
 
+    // YouTube's own page always plays the video, even where embeds are blocked.
+    var open = document.createElement('a');
+    open.className = 'btn tiny ghost open-link';
+    open.href = 'https://www.youtube.com/watch?v=' + video.videoId;
+    open.target = '_blank';
+    open.rel = 'noopener';
+    open.textContent = 'Open ↗';
+
     var del = document.createElement('button');
     del.className = 'btn tiny ghost';
     del.textContent = 'Remove';
@@ -704,6 +775,7 @@
     });
 
     actions.appendChild(play);
+    actions.appendChild(open);
     actions.appendChild(del);
     body.appendChild(actions);
     card.appendChild(body);
@@ -994,10 +1066,43 @@
     var db = engine.masterPeakDb();
     text.textContent = isFinite(db) && db > -60 ? Math.round(db) + ' dB' : '-∞';
 
+    updateBeatSync();
+
     var now = performance.now();
     if (now - lastAutoNext > 700) {
       lastAutoNext = now;
       updateAutoNext();
+    }
+  }
+
+  /** Phase meter: are both decks' kicks landing together? */
+  function updateBeatSync() {
+    var el = document.getElementById('beatState');
+    if (!el) return;
+
+    var a = engine.decks ? engine.decks.a : null;
+    var b = engine.decks ? engine.decks.b : null;
+    if (!a || !b || !a.playing || !b.playing || !a.bpm || !b.bpm) {
+      el.textContent = '—';
+      el.className = 'beat-sync-state';
+      return;
+    }
+
+    var phaseA = (a.position() / (60 / a.bpm)) % 1;
+    var phaseB = (b.position() / (60 / b.bpm)) % 1;
+    if (phaseA < 0) phaseA += 1;
+    if (phaseB < 0) phaseB += 1;
+
+    var diff = Math.abs(phaseA - phaseB);
+    if (diff > 0.5) diff = 1 - diff;
+
+    if (diff < 0.08) {
+      el.textContent = 'IN PHASE';
+      el.className = 'beat-sync-state locked';
+    } else {
+      // The deck that is further into its beat kicks first — nudge that name.
+      el.textContent = phaseA > phaseB ? 'A AHEAD · nudge B' : 'B AHEAD · nudge A';
+      el.className = 'beat-sync-state ' + (phaseA > phaseB ? 'a-ahead' : 'b-ahead');
     }
   }
 
@@ -1635,6 +1740,9 @@
     var level = deck ? deck.level() : 0;
     view.meterFill.style.width = Math.round(level * 100) + '%';
 
+    // SYNC stays lit while this deck is riding a matched tempo.
+    view.syncBtn.classList.toggle('on', !!deck && Math.abs(deck.rate - 1) > 0.001);
+
     if (playing && track && bpm > 0) {
       var beatSeconds = 60 / Math.max(bpm, 1);
       var revolutions = position / (beatSeconds * 4);
@@ -1686,6 +1794,7 @@
     engine: engine,
     tracks: function () { return tracks; },
     videos: function () { return videos; },
+    youtubeId: youtubeId,
     clearVideos: function () { videos.length = 0; saveVideos(); renderLibrary(); },
     pickNext: function () { return pickNextTrack(null, null); },
     status: function () {

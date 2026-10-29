@@ -314,6 +314,7 @@
     this.bpm = 0;
 
     this.rate = 1;
+    this.bend = 0;
     this.pausedPos = 0;
 
     this.playing = false;
@@ -364,6 +365,10 @@
     this.analyser.connect(engine.masterGain);
   }
 
+  Deck.prototype.effectiveRate = function () {
+    return this.rate * (1 + this.bend / 100);
+  };
+
   Deck.prototype.applyVolume = function () {
     this.volumeGain.gain.value = clamp(this.channelVolume * this.crossGain, 0, 2);
   };
@@ -374,9 +379,11 @@
   };
 
   Deck.prototype.setEQ = function (lowDb, midDb, highDb) {
-    this.eqLow.gain.value = clamp(lowDb, -24, 24);
-    this.eqMid.gain.value = clamp(midDb, -24, 24);
-    this.eqHigh.gain.value = clamp(highDb, -24, 24);
+    // DJ-mixer range: the low band can be cut into a near-kill so a manual
+    // bass swap is possible; gains above centre are gentler.
+    this.eqLow.gain.value = clamp(lowDb, -30, 12);
+    this.eqMid.gain.value = clamp(midDb, -30, 12);
+    this.eqHigh.gain.value = clamp(highDb, -30, 12);
   };
 
   Deck.prototype.setFilter = function (v) {
@@ -402,6 +409,7 @@
     this.trackId = track.id;
     this.duration = track.duration || track.buffer.duration;
     this.bpm = track.bpm || 0;
+    this.bend = 0;
     this.pausedPos = 0;
     this.loopBeats = 0;
     this.loopStart = 0;
@@ -413,7 +421,7 @@
     var elapsed = this.ctx.currentTime - this.startedAt;
     // A source can be scheduled slightly in the future (sample-accurate cue in).
     if (elapsed < 0) return this.startedOffset;
-    var pos = this.startedOffset + elapsed * this.rate;
+    var pos = this.startedOffset + elapsed * this.effectiveRate();
     if (this.loopBeats > 0 && this.loopEnd > this.loopStart && pos >= this.loopEnd) {
       pos = this.loopStart + ((pos - this.loopStart) % (this.loopEnd - this.loopStart));
     }
@@ -446,7 +454,7 @@
 
     var src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
-    src.playbackRate.value = this.rate;
+    src.playbackRate.value = this.effectiveRate();
     src.connect(this.input);
 
     var off = clamp(offset, 0, Math.max(0, this.duration - 0.02));
@@ -512,7 +520,21 @@
     this.rate = safe;
     this.pausedPos = pos;
     if (this.playing && this.source) {
-      this.source.playbackRate.value = safe;
+      this.source.playbackRate.value = this.effectiveRate();
+      this.startedAt = this.ctx.currentTime;
+      this.startedOffset = pos;
+    }
+  };
+
+  /**
+   * Temporary pitch bend for jog-wheel nudging: the deck rides faster or
+   * slower while the finger is down, then snaps back to its base tempo.
+   */
+  Deck.prototype.setBend = function (percent) {
+    this.bend = clamp(percent, -30, 30);
+    if (this.playing && this.source) {
+      var pos = this.position();
+      this.source.playbackRate.value = this.effectiveRate();
       this.startedAt = this.ctx.currentTime;
       this.startedOffset = pos;
     }
@@ -540,10 +562,28 @@
     return this.bpm * this.rate;
   };
 
-  Deck.prototype.syncTo = function (other) {
+  Deck.prototype.syncTo = function (other, alignBeats) {
     if (!this.bpm || !other || !other.bpm) return;
     var target = other.bpm * other.rate;
     this.setRate(clamp(target / this.bpm, 0.5, 2));
+
+    // Tempo alone is only half of sync: when both decks are running, line the
+    // beats up so the kicks land together. Both timelines now advance at the
+    // same real-time speed, so comparing beat phases in each track's own
+    // timeline is valid.
+    if (!alignBeats || !this.playing || !other.playing) return;
+
+    var myBeat = 60 / this.bpm;
+    var otherBeat = 60 / other.bpm;
+    var phaseMe = (this.position() / myBeat) % 1;
+    var phaseOther = (other.position() / otherBeat) % 1;
+    var delta = (phaseOther - phaseMe) * myBeat;
+    if (delta > myBeat / 2) delta -= myBeat;
+    if (delta < -myBeat / 2) delta += myBeat;
+    // Only re-schedule for meaningful drift; a seek restarts the buffer source.
+    if (Math.abs(delta) > myBeat * 0.06) {
+      this.seek(this.position() + delta);
+    }
   };
 
   Deck.prototype.level = function () {

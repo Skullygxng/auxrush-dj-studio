@@ -207,8 +207,8 @@ body::before {
 }
 
 .platter {
-  width: 74px;
-  height: 74px;
+  width: 86px;
+  height: 86px;
   flex: none;
   border-radius: 50%;
   background: radial-gradient(circle at 30% 25%, #262633, #101018 70%);
@@ -227,8 +227,8 @@ body::before {
 }
 
 .platter-hub {
-  width: 40px;
-  height: 40px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -903,6 +903,8 @@ input[type="range"]::-moz-range-thumb {
   inset: 0;
   display: grid;
   place-items: center;
+  cursor: pointer;
+  text-decoration: none;
   background: #000 center / cover no-repeat;
 }
 
@@ -925,4 +927,46 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.92);
   color: #05070a;
   font-size: 18px;
+}
+
+/* beat phase indicator + jog platters (audit pass) */
+
+.platter { cursor: grab; }
+.platter:active { cursor: grabbing; }
+
+.beat-sync {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+.beat-sync-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.beat-sync-state {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.beat-sync-state.locked { color: var(--ok); }
+.beat-sync-state.a-ahead { color: var(--a); }
+.beat-sync-state.b-ahead { color: var(--b); }
+a.btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
