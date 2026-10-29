@@ -19,7 +19,6 @@
   var lastAutoNext = 0;
   var recordings = [];
   var meterSegments = [];
-  var fadeRAF = null;
   var lastDraw = 0;
 
   var VIEW_SECONDS = 8;
@@ -151,7 +150,9 @@
       needsLoad: false,
       dragging: false,
       dragBase: 0,
-      dragPos: 0
+      dragPos: 0,
+      needsRedraw: true,
+      lastDrawnKey: -1
     };
 
     wireDeck(view);
@@ -230,6 +231,7 @@
       var deck = deckFor(view);
       deck.pause();
       deck.seek(cueTime());
+      view.needsRedraw = true;
     }
 
     view.cueBtn.addEventListener('pointerup', releaseCue);
@@ -250,6 +252,7 @@
         var beats = Number(chip.getAttribute('data-loop'));
         var deck = deckFor(view);
         deck.setLoop(beats);
+        view.needsRedraw = true;
         view.loopChips.forEach(function (c, j) {
           c.classList.toggle('active', j === index);
         });
@@ -342,6 +345,7 @@
       view.dragging = false;
       var deck = engine.decks ? engine.decks[view.id] : null;
       if (deck) deck.seek(view.dragPos);
+      view.needsRedraw = true;
       try { canvas.releasePointerCapture(event.pointerId); } catch (err) { /* ignore */ }
     });
 
@@ -376,6 +380,7 @@
     var cues = view.track.cues;
     if (cues[index] != null) {
       deck.seek(view.track.cues[index]);
+      view.needsRedraw = true;
     } else {
       view.track.cues[index] = snapToBeat(deck, deck.position());
       updateCueButtons(view);
@@ -385,6 +390,7 @@
 
   function updateCueButtons(view) {
     var cues = view.track ? view.track.cues : null;
+    view.needsRedraw = true;
     view.cueSlots.forEach(function (slot, index) {
       slot.classList.toggle('set', !!(cues && cues[index] != null));
     });
@@ -397,6 +403,12 @@
     view.needsLoad = true;
     if (!track.cues) track.cues = [null, null, null, null];
 
+    // Loading stops a running deck: say so instead of silently cutting sound.
+    var liveDeck = engine.decks ? engine.decks[view.id] : null;
+    if (liveDeck && liveDeck.playing) {
+      toast('Heads up: deck ' + view.id.toUpperCase() + ' was playing — it stopped');
+    }
+
     view.titleEl.textContent = track.title;
     view.artistEl.textContent = track.artist + ' · ' + fmtTime(track.duration);
     view.bpmEl.textContent = track.bpm ? track.bpm.toFixed(1) : '--';
@@ -404,6 +416,7 @@
     view.hubBpm.textContent = track.bpm ? String(Math.round(track.bpm)) : '--';
     view.timeEl.textContent = '0:00 / -' + fmtTime(track.duration);
     view.panel.classList.remove('playing');
+    view.needsRedraw = true;
     view.loopChips.forEach(function (chip, index) {
       chip.classList.toggle('active', index === 0);
     });
@@ -436,6 +449,7 @@
     view.hubBpm.textContent = track.bpm ? String(Math.round(track.bpm)) : '--';
     view.timeEl.textContent = '0:00 / -' + fmtTime(track.duration);
     updateCueButtons(view);
+    view.needsRedraw = true;
   }
 
   // -------------------------------------------------------------- library
@@ -995,6 +1009,19 @@
       link.textContent = 'Download';
 
       row.appendChild(name);
+
+      var del = document.createElement('button');
+      del.className = 'btn tiny ghost';
+      del.textContent = '✕';
+      del.setAttribute('aria-label', 'Remove recording');
+      del.addEventListener('click', function () {
+        var idx = recordings.indexOf(rec);
+        if (idx >= 0) recordings.splice(idx, 1);
+        try { URL.revokeObjectURL(rec.url); } catch (err) { /* already gone */ }
+        renderRecordings();
+      });
+      row.appendChild(del);
+
       row.appendChild(link);
       list.appendChild(row);
     });
@@ -1056,15 +1083,14 @@
   }
 
   function updateStrip() {
-    var level = engine.masterLevel();
-    var lit = Math.round(level * meterSegments.length);
+    var meter = engine.masterMeter();
+    var lit = Math.round(meter.level * meterSegments.length);
     for (var i = 0; i < meterSegments.length; i++) {
       meterSegments[i].classList.toggle('lit', i < lit);
     }
 
     var text = document.getElementById('masterLevelText');
-    var db = engine.masterPeakDb();
-    text.textContent = isFinite(db) && db > -60 ? Math.round(db) + ' dB' : '-∞';
+    text.textContent = isFinite(meter.db) && meter.db > -60 ? Math.round(meter.db) + ' dB' : '-∞';
 
     updateBeatSync();
 
@@ -1148,29 +1174,6 @@
   //   · near the end of the playing track it loads the next unused track on
   //     the idle deck, tempo-matches it, lines the beats up and crossfades,
   //   · it always moves forward through the library and wraps around.
-
-  function fadeCrossfader(target, seconds) {
-    if (fadeRAF) cancelAnimationFrame(fadeRAF);
-
-    var input = document.getElementById('crossfader');
-    var start = engine.crossfader;
-    var t0 = performance.now();
-    var duration = Math.max(300, seconds * 1000);
-
-    function tick(now) {
-      var p = Math.min(1, (now - t0) / duration);
-      var value = start + (target - start) * p;
-      engine.setCrossfader(value);
-      if (input) input.value = String(value);
-      if (p < 1) {
-        fadeRAF = requestAnimationFrame(tick);
-      } else {
-        fadeRAF = null;
-      }
-    }
-
-    fadeRAF = requestAnimationFrame(tick);
-  }
 
   // --- Auto DJ helpers ---
 
@@ -1516,7 +1519,15 @@
     // The outgoing deck is done: stop it and give its EQ back to the sliders
     // so whatever gets loaded there next starts clean.
     mix.from.pause();
+    if (mix.from.loopBeats) {
+      // Don't leave a stale loop armed on a deck the set has moved past.
+      mix.from.setLoop(0);
+      mix.fromView.loopChips.forEach(function (chip, index) {
+        chip.classList.toggle('active', index === 0);
+      });
+    }
     mix.from.seek(0);
+    mix.fromView.needsRedraw = true;
     applySettings(mix.fromView, mix.from);
     applySettings(mix.toView, mix.to);
 
@@ -1750,7 +1761,16 @@
       view.ring.style.transform = 'rotate(' + degrees.toFixed(1) + 'deg)';
     }
 
-    if (shouldDraw) drawWave(view, deck, position);
+    if (shouldDraw) {
+      var posKey = Math.round(position * 100);
+      // Paused, unchanged decks don't need a repaint; state changes set
+      // needsRedraw (load, loop, cue, seek).
+      if (playing || view.dragging || view.needsRedraw || view.lastDrawnKey !== posKey) {
+        drawWave(view, deck, position);
+        view.lastDrawnKey = posKey;
+        view.needsRedraw = false;
+      }
+    }
   }
 
   // ------------------------------------------------------------------ loop

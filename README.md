@@ -64,3 +64,7 @@ up with the live one and blends from the side the crossfader is pointing at.
 
 Tempo matching uses playback rate, so a matched track is pitch-shifted — Web Audio has no
 keylock without a time-stretcher. YouTube audio can't be routed into the mixer.
+
+Imported tracks live in memory for the session: reloading the page empties the library
+(the built-in grooves are always regenerated). Persisting imports needs IndexedDB.
+Recording a set is session-only too — download what you want to keep.

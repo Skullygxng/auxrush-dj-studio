@@ -704,6 +704,20 @@
     return 20 * Math.log10(Math.max(peak, 1e-6));
   };
 
+  /** Level + peak dB in a single analyser read, for the per-frame loop. */
+  Engine.prototype.masterMeter = function () {
+    if (!this.masterAnalyser) return { level: 0, db: -Infinity };
+    this.masterAnalyser.getFloatTimeDomainData(this.masterData);
+    var peak = 0;
+    var d = this.masterData;
+    for (var i = 0; i < d.length; i++) {
+      var v = Math.abs(d[i]);
+      if (v > peak) peak = v;
+    }
+    var db = 20 * Math.log10(Math.max(peak, 1e-6));
+    return { level: clamp((db + 60) / 60, 0, 1), db: db };
+  };
+
   Engine.prototype.startRecording = function () {
     this.ensureContext();
     if (!this.recordDest || typeof window.MediaRecorder === 'undefined') {
