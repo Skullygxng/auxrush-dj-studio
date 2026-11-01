@@ -14,6 +14,14 @@
   <header class="topbar">
     <div class="brand"><span class="brand-a">AUXRUSH</span><span class="brand-b">DJ STUDIO</span></div>
     <div class="top-actions">
+      <button id="padsBtn" class="icon-btn" title="Sampler pads" aria-label="Sampler pads">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
+      </button>
       <button id="recordBtn" class="icon-btn" title="Record set" aria-label="Record set">
         <span class="record-dot"></span>
       </button>
@@ -29,22 +37,26 @@
     <section class="deck-slot" data-deck="a"></section>
 
     <section class="strip">
-      <div class="strip-block">
-        <div class="crossfader-row">
-          <span class="cross-label a">A</span>
-          <input id="crossfader" class="crossfader" type="range" min="0" max="1" step="0.005" value="0.5" aria-label="Crossfader">
-          <span class="cross-label b">B</span>
+      <div class="strip-mix">
+        <div class="chan">
+          <span class="chan-label a">A</span>
+          <div id="faderA" class="vfader" aria-label="Deck A volume">
+            <div class="vf-track"><div class="vf-fill"></div></div>
+            <div class="vf-thumb"></div>
+          </div>
+          <div class="chan-meter"><div id="meterA" class="chan-meter-fill"></div></div>
         </div>
-        <div class="beat-sync">
-          <span class="beat-sync-label">BEATS</span>
-          <span id="beatState" class="beat-sync-state">—</span>
-        </div>
-      </div>
 
-      <div class="strip-block">
-        <div class="strip-row">
-          <button id="autoDJBtn" class="btn auto">AUTO DJ</button>
-          <div id="autoNext" class="auto-next">Off · tap to run the set</div>
+        <div class="chan-center">
+          <div class="crossfader-row">
+            <span class="cross-label a">A</span>
+            <input id="crossfader" class="crossfader" type="range" min="0" max="1" step="0.005" value="0.5" aria-label="Crossfader">
+            <span class="cross-label b">B</span>
+          </div>
+          <div class="beat-sync">
+            <span class="beat-sync-label">BEATS</span>
+            <span id="beatState" class="beat-sync-state">—</span>
+          </div>
           <div class="master">
             <div class="master-top">
               <span>MASTER</span>
@@ -54,6 +66,40 @@
             <div class="master-meter" id="masterMeter"></div>
           </div>
         </div>
+
+        <div class="chan">
+          <span class="chan-label b">B</span>
+          <div id="faderB" class="vfader" aria-label="Deck B volume">
+            <div class="vf-track"><div class="vf-fill"></div></div>
+            <div class="vf-thumb"></div>
+          </div>
+          <div class="chan-meter"><div id="meterB" class="chan-meter-fill"></div></div>
+        </div>
+      </div>
+
+      <div class="strip-block">
+        <div class="strip-row">
+          <button id="autoDJBtn" class="btn auto">AUTO DJ</button>
+          <div id="autoNext" class="auto-next">Off · tap to run the set</div>
+          <div class="auto-settings">
+            <div class="set-row">
+              <span class="set-label">STYLE</span>
+              <button class="set-chip active" data-astyle="swap">SWAP</button>
+              <button class="set-chip" data-astyle="lift">LIFT</button>
+              <button class="set-chip" data-astyle="echo">ECHO</button>
+              <button class="set-chip" data-astyle="cut">CUT</button>
+            </div>
+            <div class="set-row">
+              <span class="set-label">LENGTH</span>
+              <button class="set-chip" data-alen="8">8</button>
+              <button class="set-chip active" data-alen="16">16</button>
+              <button class="set-chip" data-alen="32">32</button>
+              <button class="set-chip active" data-alen="auto">AUTO</button>
+            </div>
+            <button id="mixNow" class="btn ghost wide">⚡ MIX NOW</button>
+          </div>
+          <div id="nextList" class="next-list"></div>
+        </div>
       </div>
     </section>
 
@@ -61,9 +107,21 @@
   </main>
 </div>
 
+<div id="padTray" class="pad-tray hidden">
+  <div class="pad-tray-head">
+    <span>SAMPLER</span>
+    <button id="padsClose" class="icon-btn" aria-label="Close pads">✕</button>
+  </div>
+  <div id="padGrid" class="pad-grid"></div>
+</div>
+
 <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Library">
   <div class="sheet-head">
     <div class="sheet-title">Library</div>
+    <div class="mini-transport">
+      <button id="miniA" class="btn tiny mini-a" title="Play or pause deck A">A</button>
+      <button id="miniB" class="btn tiny mini-b" title="Play or pause deck B">B</button>
+    </div>
     <button id="sheetClose" class="icon-btn" aria-label="Close">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M6 6l12 12M18 6L6 18"/>

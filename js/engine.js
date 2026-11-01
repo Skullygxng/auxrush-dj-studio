@@ -28,6 +28,12 @@
     var winCount = Math.max(1, Math.floor(length / winFrames));
     var energy = new Float32Array(winCount);
     var peaks = new Float32Array(PEAK_COUNT);
+    // Tone per peak bucket: low-frequency share, for colored waveforms.
+    var tone = new Float32Array(PEAK_COUNT);
+    var lowSum = new Float32Array(PEAK_COUNT);
+    var totSum = new Float32Array(PEAK_COUNT);
+    var lp = 0;
+    var aLow = 1 - Math.exp(-2 * Math.PI * 220 / sr);
     var i;
 
     for (i = 0; i < length; i++) {
@@ -35,8 +41,12 @@
         ? (Math.abs(ch0[i]) + Math.abs(ch1[i])) * 0.5
         : Math.abs(ch0[i]);
 
+      lp += (v - lp) * aLow;
+
       var pi = Math.min(PEAK_COUNT - 1, Math.floor(i * PEAK_COUNT / length));
       if (v > peaks[pi]) peaks[pi] = v;
+      lowSum[pi] += lp * lp;
+      totSum[pi] += v * v;
 
       var wi = Math.min(winCount - 1, Math.floor(i / winFrames));
       if (v > energy[wi]) energy[wi] = v;
@@ -49,6 +59,9 @@
     if (peakMax > 0.001) {
       var scale = 0.95 / peakMax;
       for (i = 0; i < PEAK_COUNT; i++) peaks[i] = peaks[i] * scale;
+    }
+    for (i = 0; i < PEAK_COUNT; i++) {
+      tone[i] = totSum[i] > 1e-9 ? clamp(lowSum[i] / totSum[i], 0, 1) : 0.5;
     }
 
     var bpm = 0;
@@ -93,6 +106,7 @@
     return {
       bpm: bpm,
       peaks: peaks,
+      tone: tone,
       duration: length / sr,
       key: key,
       energy: structure.energy,
@@ -303,6 +317,19 @@
 
   // ------------------------------------------------------------------- deck
 
+  /** Synthesized plate-ish impulse for the reverb send. */
+  function makeImpulse(ctx, seconds, decay) {
+    var len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+    var buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (var c = 0; c < 2; c++) {
+      var d = buf.getChannelData(c);
+      for (var i = 0; i < len; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+      }
+    }
+    return buf;
+  }
+
   function Deck(ctx, engine, id) {
     this.ctx = ctx;
     this.engine = engine;
@@ -328,6 +355,21 @@
 
     this.channelVolume = 1;
     this.crossGain = 0.707;
+
+    // Slip (flux): while held, the deck keeps "playing" underneath at zero
+    // gain so it can re-enter exactly where the record would have been.
+    this.slip = false;
+    this.slipHeld = false;
+    this.slipStartCtx = 0;
+    this.slipStartPos = 0;
+
+    // Scratch: short grains played from the buffer (and its reverse) while a
+    // finger drags the platter hub.
+    this.scratchActive = false;
+    this.scratchWasPlaying = false;
+    this.scratchPos = 0;
+    this.scratchGrain = null;
+    this.revBuffer = null;
 
     this.eqLow = ctx.createBiquadFilter();
     this.eqLow.type = 'lowshelf';
@@ -363,6 +405,34 @@
     this.filterNode.connect(this.volumeGain);
     this.volumeGain.connect(this.analyser);
     this.analyser.connect(engine.masterGain);
+
+    // FX sends: parallel taps off the EQ output into the channel gain, so FX
+    // stay post-EQ but still respect channel volume and the crossfader.
+    this.fxIn = ctx.createGain();
+    this.eqHigh.connect(this.fxIn);
+
+    this.echo = ctx.createDelay(2);
+    this.echo.delayTime.value = 0.25;
+    this.echoFb = ctx.createGain();
+    this.echoFb.gain.value = 0.45;
+    this.echoWet = ctx.createGain();
+    this.echoWet.gain.value = 0;
+    this.fxIn.connect(this.echo);
+    this.echo.connect(this.echoFb);
+    this.echoFb.connect(this.echo);
+    this.echo.connect(this.echoWet);
+    this.echoWet.connect(this.volumeGain);
+
+    this.verb = ctx.createConvolver();
+    this.verb.buffer = makeImpulse(ctx, 2.2, 2.5);
+    this.verbWet = ctx.createGain();
+    this.verbWet.gain.value = 0;
+    this.fxIn.connect(this.verb);
+    this.verb.connect(this.verbWet);
+    this.verbWet.connect(this.volumeGain);
+
+    this.fluxLfo = null;
+    this.fx = { echo: false, verb: false, flux: false };
   }
 
   Deck.prototype.effectiveRate = function () {
@@ -370,7 +440,8 @@
   };
 
   Deck.prototype.applyVolume = function () {
-    this.volumeGain.gain.value = clamp(this.channelVolume * this.crossGain, 0, 2);
+    var level = this.slipHeld ? 0 : clamp(this.channelVolume * this.crossGain, 0, 2);
+    this.volumeGain.gain.value = level;
   };
 
   Deck.prototype.setVolume = function (v) {
@@ -402,13 +473,59 @@
     }
   };
 
+  /** FX pads: tempo-synced echo, plate reverb, and a filter LFO ("flux"). */
+  Deck.prototype.setFX = function (name, on) {
+    var t = this.ctx.currentTime;
+    if (name === 'echo') {
+      this.fx.echo = !!on;
+      this.echoWet.gain.setTargetAtTime(on ? 0.5 : 0, t, 0.05);
+    } else if (name === 'verb') {
+      this.fx.verb = !!on;
+      this.verbWet.gain.setTargetAtTime(on ? 0.4 : 0, t, 0.08);
+    } else if (name === 'flux') {
+      this.fx.flux = !!on;
+      if (on && !this.fluxLfo) {
+        var lfo = this.ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = 0.3;
+        var depth = this.ctx.createGain();
+        depth.gain.value = 1400;
+        lfo.connect(depth);
+        depth.connect(this.filterNode.frequency);
+        lfo.start();
+        this.fluxLfo = lfo;
+      } else if (!on && this.fluxLfo) {
+        try { this.fluxLfo.stop(); } catch (err) { /* already stopped */ }
+        this.fluxLfo = null;
+      }
+    }
+  };
+
+  Deck.prototype.clearFX = function () {
+    this.setFX('echo', false);
+    this.setFX('verb', false);
+    this.setFX('flux', false);
+  };
+
+  /** 1/8-note echo time from the deck's own BPM. */
+  Deck.prototype.syncEchoToTempo = function () {
+    if (this.bpm > 0) this.echo.delayTime.value = Math.min(1.9, 30 / this.bpm);
+  };
+
   Deck.prototype.loadTrack = function (track) {
+    this.scratchEnd();
+    this.scratchActive = false;
+    this.scratchWasPlaying = false;
+    this.slipHeld = false;
+    this.revBuffer = null;
     this.stopSource();
     this.playing = false;
+    this.clearFX();
     this.buffer = track.buffer;
     this.trackId = track.id;
     this.duration = track.duration || track.buffer.duration;
     this.bpm = track.bpm || 0;
+    this.syncEchoToTempo();
     this.bend = 0;
     this.pausedPos = 0;
     this.loopBeats = 0;
@@ -490,22 +607,159 @@
     this.startAt(offset, delay);
   };
 
+  // ---------------------------------------------------------------- scratch
+
+  /** Reversed copy of the buffer, built once, for backward scratch grains. */
+  Deck.prototype.buildReverse = function () {
+    if (this.revBuffer || !this.buffer) return;
+    var b = this.buffer;
+    var rev = this.ctx.createBuffer(b.numberOfChannels, b.length, b.sampleRate);
+    for (var c = 0; c < b.numberOfChannels; c++) {
+      var src = b.getChannelData(c);
+      var dst = rev.getChannelData(c);
+      for (var i = 0, n = b.length; i < n; i++) dst[i] = src[n - 1 - i];
+    }
+    this.revBuffer = rev;
+  };
+
+  /** Grabs the deck for scratching: main audio stops, grains take over. */
+  Deck.prototype.scratchStart = function () {
+    if (!this.buffer) return false;
+    this.buildReverse();
+
+    this.scratchWasPlaying = this.playing && !this.slipHeld;
+    this.scratchPos = this.slipHeld ? this.slipPosition() : this.position();
+    this.scratchActive = true;
+
+    if (this.playing && !this.slipHeld) {
+      this.stopSource();
+      this.playing = false;
+    }
+    return true;
+  };
+
+  /**
+   * Plays one short grain at the scratch position, forward or backward.
+   * `handSpeed` (1 = a normal drag) sets the grain's playback rate, which is
+   * what gives faster scratches their pitch lift.
+   */
+  Deck.prototype.scratchMove = function (deltaSeconds, handSpeed) {
+    if (!this.scratchActive || !this.buffer) return;
+
+    this.scratchPos = clamp(this.scratchPos + deltaSeconds, 0, Math.max(0, this.duration - 0.05));
+
+    var forward = deltaSeconds >= 0;
+    var rate = clamp(handSpeed || 1, 0.7, 2.6);
+    var grain = 0.075;
+
+    var src = this.ctx.createBufferSource();
+    src.buffer = forward ? this.buffer : (this.revBuffer || this.buffer);
+    src.playbackRate.value = rate;
+    src.connect(this.volumeGain);
+
+    var offset = forward
+      ? this.scratchPos
+      : clamp(this.duration - this.scratchPos - grain * rate, 0, Math.max(0, this.duration - grain * rate));
+
+    var now = this.ctx.currentTime;
+    src.start(now, offset, grain * rate);
+
+    if (this.scratchGrain) {
+      try { this.scratchGrain.stop(); } catch (err) { /* already finished */ }
+    }
+    this.scratchGrain = src;
+  };
+
+  Deck.prototype.scratchEnd = function () {
+    if (!this.scratchActive) return;
+    this.scratchActive = false;
+
+    if (this.scratchGrain) {
+      try { this.scratchGrain.stop(); } catch (err) { /* already finished */ }
+      this.scratchGrain = null;
+    }
+
+    var target = this.scratchPos;
+
+    if (this.slip && this.scratchWasPlaying) {
+      // Slip: the record kept moving underneath, so resume where it would be.
+      target = this.slipHeld ? this.slipPosition() : this.scratchPos;
+    }
+
+    this.pausedPos = target;
+
+    if (this.scratchWasPlaying) {
+      this.slipHeld = false;
+      this.playing = false;
+      this.startAt(target);
+      this.applyVolume();
+    }
+  };
+
   Deck.prototype.play = function () {
-    if (!this.buffer || this.playing) return;
+    if (!this.buffer) return;
+
+    // Coming back from a slip hold: the source never stopped, so just unmute
+    // and the record carries on from where it would have been.
+    if (this.slipHeld) {
+      this.slipHeld = false;
+      this.applyVolume();
+      return;
+    }
+
+    if (this.playing) return;
     this.startAt(clamp(this.pausedPos, 0, Math.max(0, this.duration - 0.02)));
   };
 
   Deck.prototype.pause = function () {
     if (!this.playing) return;
+
+    if (this.slip && this.buffer && !this.slipHeld) {
+      // Slip: keep the clock running silently instead of stopping the source.
+      this.slipHeld = true;
+      this.slipStartCtx = this.ctx.currentTime;
+      this.slipStartPos = this.position();
+      this.applyVolume();
+      return;
+    }
+
     var pos = this.position();
     this.stopSource();
     this.playing = false;
     this.pausedPos = pos;
   };
 
+  /** Where the record would be right now if slip hadn't muted it. */
+  Deck.prototype.slipPosition = function () {
+    if (!this.slipHeld) return this.position();
+    var elapsed = this.ctx.currentTime - this.slipStartCtx;
+    return clamp(this.slipStartPos + elapsed * this.rate, 0, this.duration);
+  };
+
+  Deck.prototype.setSlip = function (on) {
+    this.slip = !!on;
+    // Turning slip off while held turns it into a normal pause.
+    if (!this.slip && this.slipHeld) {
+      var pos = this.slipPosition();
+      this.slipHeld = false;
+      this.stopSource();
+      this.playing = false;
+      this.pausedPos = pos;
+      this.applyVolume();
+    }
+  };
+
   Deck.prototype.toggle = function () {
     if (this.playing) this.pause();
     else this.play();
+  };
+
+  /** Stops completely, whatever slip is doing. Used when the set moves on. */
+  Deck.prototype.stopNow = function () {
+    this.slipHeld = false;
+    this.stopSource();
+    this.playing = false;
+    this.applyVolume();
   };
 
   Deck.prototype.seek = function (t) {
@@ -518,6 +772,7 @@
     var safe = clamp(rate, 0.5, 2);
     var pos = this.position();
     this.rate = safe;
+    this.syncEchoToTempo();
     this.pausedPos = pos;
     if (this.playing && this.source) {
       this.source.playbackRate.value = this.effectiveRate();
@@ -653,7 +908,20 @@
     };
     this.applyCrossfader();
 
+    // Sampler bus: pads fire over the master, always audible.
+    this.padBus = ctx.createGain();
+    this.padBus.gain.value = 0.9;
+    this.padBus.connect(master);
+
     return ctx;
+  };
+
+  Engine.prototype.playPad = function (buffer) {
+    if (!buffer || !this.ctx) return;
+    var src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.padBus);
+    src.start();
   };
 
   Engine.prototype.deck = function (id) {
@@ -947,11 +1215,124 @@
     return ctx.startRendering();
   }
 
+  // ------------------------------------------------------------- sampler
+
+  var PAD_NAMES = ['AIR HORN', 'SIREN', 'LASER', 'RISER', 'CRASH', 'STAB', 'BELL', 'BLIP'];
+
+  function renderPad(kind, sr) {
+    var OfflineCtor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    var lengths = { 'AIR HORN': 1.2, SIREN: 1.6, LASER: 0.5, RISER: 2.4, CRASH: 1.8, STAB: 0.7, BELL: 1.4, BLIP: 0.25 };
+    var ctx = new OfflineCtor(2, Math.ceil(sr * (lengths[kind] || 1)), sr);
+    var out = ctx.createGain();
+    out.gain.value = 0.8;
+    out.connect(ctx.destination);
+
+    function osc(type, freq, t0, t1, gain) {
+      var o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t0);
+      var g = ctx.createGain();
+      g.gain.setValueAtTime(gain, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t1);
+      o.connect(g);
+      g.connect(out);
+      o.start(t0);
+      o.stop(t1 + 0.02);
+      return o;
+    }
+
+    function noise(t0, t1, gain, filterType, f0, f1) {
+      var len = Math.floor(sr * (t1 - t0));
+      var buf = ctx.createBuffer(1, Math.max(1, len), sr);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      var src = ctx.createBufferSource();
+      src.buffer = buf;
+      var flt = ctx.createBiquadFilter();
+      flt.type = filterType;
+      flt.frequency.setValueAtTime(f0, t0);
+      if (f1) flt.frequency.exponentialRampToValueAtTime(f1, t1);
+      var g = ctx.createGain();
+      g.gain.setValueAtTime(gain, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t1);
+      src.connect(flt);
+      flt.connect(g);
+      g.connect(out);
+      src.start(t0);
+      src.stop(t1 + 0.02);
+    }
+
+    if (kind === 'AIR HORN') {
+      [370, 466, 554].forEach(function (f) {
+        var o = osc('sawtooth', f, 0, 1.15, 0.18);
+        var vib = ctx.createOscillator();
+        vib.frequency.value = 5.5;
+        var vg = ctx.createGain();
+        vg.gain.value = f * 0.012;
+        vib.connect(vg);
+        vg.connect(o.frequency);
+        vib.start(0);
+        vib.stop(1.2);
+      });
+    } else if (kind === 'SIREN') {
+      var o = ctx.createOscillator();
+      o.type = 'sine';
+      for (var i = 0; i < 4; i++) {
+        o.frequency.setValueAtTime(520, i * 0.4);
+        o.frequency.linearRampToValueAtTime(880, i * 0.4 + 0.2);
+        o.frequency.linearRampToValueAtTime(520, i * 0.4 + 0.4);
+      }
+      var g = ctx.createGain();
+      g.gain.setValueAtTime(0.25, 0);
+      g.gain.setValueAtTime(0.25, 1.45);
+      g.gain.exponentialRampToValueAtTime(0.0001, 1.6);
+      o.connect(g);
+      g.connect(out);
+      o.start(0);
+      o.stop(1.62);
+    } else if (kind === 'LASER') {
+      var laser = osc('square', 1800, 0, 0.4, 0.2);
+      laser.frequency.exponentialRampToValueAtTime(120, 0.38);
+    } else if (kind === 'RISER') {
+      noise(0, 2.3, 0.22, 'bandpass', 300, 6000);
+    } else if (kind === 'CRASH') {
+      noise(0, 1.7, 0.5, 'highpass', 3000, 9000);
+    } else if (kind === 'STAB') {
+      [220, 261.63, 329.63].forEach(function (f, i) {
+        osc('sawtooth', f, 0, 0.6, 0.14 / (i + 1));
+      });
+    } else if (kind === 'BELL') {
+      osc('sine', 1046.5, 0, 1.3, 0.2);
+      osc('sine', 1568, 0, 0.9, 0.08);
+      osc('sine', 2637, 0, 0.5, 0.05);
+    } else if (kind === 'BLIP') {
+      osc('square', 880, 0, 0.18, 0.2);
+    }
+
+    return ctx.startRendering();
+  }
+
+  /** Renders all sampler pads offline; resolves as a name → AudioBuffer map. */
+  function renderPads() {
+    var sr = 44100;
+    var out = {};
+    return PAD_NAMES.reduce(function (chain, kind) {
+      return chain.then(function (map) {
+        return renderPad(kind, sr).then(function (buffer) {
+          map[kind] = buffer;
+          return map;
+        });
+      });
+    }, Promise.resolve(out));
+  }
+
   window.AuxRush = {
     Engine: Engine,
     Deck: Deck,
     analyzeBuffer: analyzeBuffer,
     renderDemo: renderDemo,
+    renderPads: renderPads,
+    PAD_NAMES: PAD_NAMES,
     DEMOS: DEMOS,
     clamp: clamp
   };

@@ -89,6 +89,8 @@
             '<button class="chip" data-loop="2">2</button>' +
             '<button class="chip" data-loop="4">4</button>' +
             '<button class="chip" data-loop="8">8</button>' +
+            '<button class="chip jump" data-jump="-1" title="Jump back one bar">‹1</button>' +
+            '<button class="chip jump" data-jump="1" title="Jump forward one bar">1›</button>' +
           '</div>' +
         '</div>' +
 
@@ -97,6 +99,14 @@
           '<button class="cue-slot" data-cue="1">2</button>' +
           '<button class="cue-slot" data-cue="2">3</button>' +
           '<button class="cue-slot" data-cue="3">4</button>' +
+        '</div>' +
+
+        '<div class="fx-row">' +
+          '<button class="chip fx" data-fx="echo">ECHO</button>' +
+          '<button class="chip fx" data-fx="verb">VERB</button>' +
+          '<button class="chip fx" data-fx="flux">FLUX</button>' +
+          '<button class="chip slip" data-slip title="Slip: pause or scratch and the record carries on underneath">SLIP</button>' +
+          '<button class="chip fx quant active" data-quant title="Quantize: snap cues and loops to the grid">Q</button>' +
         '</div>' +
 
         '<div class="deck-mix">' +
@@ -108,9 +118,6 @@
             '<input type="range" class="f-mid" min="-30" max="12" step="0.5" value="0"></label>' +
           '<label class="knob"><span>HIGH</span>' +
             '<input type="range" class="f-high" min="-30" max="12" step="0.5" value="0"></label>' +
-          '<label class="fader"><span>VOL</span>' +
-            '<input type="range" class="f-vol" min="0" max="1" step="0.01" value="1"></label>' +
-          '<div class="deck-meter"><div class="deck-meter-fill"></div></div>' +
           '<label class="fader"><span>PITCH</span>' +
             '<input type="range" class="f-pitch" min="-16" max="16" step="0.1" value="0"></label>' +
         '</div>' +
@@ -137,15 +144,19 @@
       playBtn: panel.querySelector('.btn.play'),
       cueBtn: panel.querySelector('.btn.cue'),
       syncBtn: panel.querySelector('.btn.sync'),
-      loopChips: Array.prototype.slice.call(panel.querySelectorAll('.chip')),
+      loopChips: Array.prototype.slice.call(panel.querySelectorAll('.chip:not(.fx):not(.jump)')),
+      fxChips: Array.prototype.slice.call(panel.querySelectorAll('.fx-row .fx:not(.quant)')),
+      quantChip: panel.querySelector('.fx-row .quant'),
+      slipChip: panel.querySelector('.fx-row .slip'),
+      jumpChips: Array.prototype.slice.call(panel.querySelectorAll('.chip.jump')),
       cueSlots: Array.prototype.slice.call(panel.querySelectorAll('.cue-slot')),
       filter: panel.querySelector('.f-filter'),
       low: panel.querySelector('.f-low'),
       mid: panel.querySelector('.f-mid'),
       high: panel.querySelector('.f-high'),
-      vol: panel.querySelector('.f-vol'),
       pitch: panel.querySelector('.f-pitch'),
-      meterFill: panel.querySelector('.deck-meter-fill'),
+      quantize: true,
+      slip: false,
       track: null,
       needsLoad: false,
       dragging: false,
@@ -160,18 +171,33 @@
   }
 
   function applySettings(view, deck) {
-    deck.setVolume(Number(view.vol.value));
     deck.setEQ(Number(view.low.value), Number(view.mid.value), Number(view.high.value));
     deck.setFilter(Number(view.filter.value));
     deck.setRate(1 + Number(view.pitch.value) / 100);
+    deck.setSlip(!!view.slip);
   }
 
-  /** The engine's deck for a view, loading the pending track on first use. */
+/**
+   * The engine's deck for a view, loading the pending track on first use.
+   * Persisted imports have no decoded buffer yet — their audio comes from
+   * IndexedDB and decodes lazily; the deck loads the moment it arrives.
+   */
   function deckFor(view) {
     var deck = engine.deck(view.id);
     if (view.needsLoad && view.track) {
-      deck.loadTrack(view.track);
+      var track = view.track;
       view.needsLoad = false;
+      if (track.buffer) {
+        deck.loadTrack(track);
+      } else if (track.imported) {
+        ensureBuffer(track, function () {
+          if (view.track === track && !deck.buffer) {
+            deck.loadTrack(track);
+            applySettings(view, deck);
+            view.needsRedraw = true;
+          }
+        });
+      }
     }
     applySettings(view, deck);
     return deck;
@@ -191,6 +217,21 @@
       // Creating the engine also brings the other deck's track in, so both
       // panels keep their real BPM and key from the first tap.
       syncDecksWithViews();
+      // A restored import may still be decoding — wait for it, then play.
+      if (!deck.buffer && view.track.imported) {
+        view.artistEl.textContent = 'Loading audio…';
+        ensureBuffer(view.track, function () {
+          if (!view.track) return;
+          if (!deck.buffer || deck.trackId !== view.track.id) {
+            deck.loadTrack(view.track);
+          }
+          view.artistEl.textContent = view.track.artist + ' · ' + fmtTime(view.track.duration);
+          applySettings(view, deck);
+          deck.play();
+          view.needsRedraw = true;
+        });
+        return;
+      }
       deck.toggle();
       // Browsers can start the context suspended; nudge it on the tap and say
       // so if the platform keeps it blocked.
@@ -259,6 +300,45 @@
       });
     });
 
+    // FX pads: tempo-synced echo, plate reverb, filter flux — fire mid-mix.
+    view.fxChips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        if (!view.track) return;
+        var deck = deckFor(view);
+        var name = chip.getAttribute('data-fx');
+        var on = !chip.classList.contains('on');
+        deck.setFX(name, on);
+        chip.classList.toggle('on', on);
+      });
+    });
+
+    // Quantize toggle: cue sets and loop starts snap to the beat grid.
+    view.quantChip.addEventListener('click', function () {
+      view.quantize = !view.quantize;
+      view.quantChip.classList.toggle('active', view.quantize);
+      toast('Quantize ' + (view.quantize ? 'on · cues and loops snap to the grid' : 'off'));
+    });
+
+    // Slip: pausing or scratching mutes the deck while the record keeps moving
+    // underneath, so it re-enters on the beat when you let go.
+    view.slipChip.addEventListener('click', function () {
+      view.slip = !view.slip;
+      view.slipChip.classList.toggle('active', view.slip);
+      if (engine.decks) engine.decks[view.id].setSlip(view.slip);
+      toast('Slip ' + (view.slip ? 'on · the record keeps running underneath' : 'off'));
+    });
+
+    // Beat jump: move the playhead a whole bar without losing the beat.
+    view.jumpChips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        if (!view.track) return;
+        var deck = deckFor(view);
+        if (!deck.bpm) return;
+        var bars = Number(chip.getAttribute('data-jump'));
+        deck.seek(deck.position() + bars * (60 / deck.bpm) * 4);
+      });
+    });
+
     view.cueSlots.forEach(function (slot, index) {
       var holdTimer = null;
 
@@ -268,6 +348,7 @@
           if (view.track) {
             view.track.cues[index] = null;
             updateCueButtons(view);
+            saveCues(view.track);
             toast('Cue ' + (index + 1) + ' cleared');
           }
         }, 600);
@@ -289,14 +370,15 @@
       });
     });
 
-    [view.filter, view.low, view.mid, view.high, view.vol, view.pitch].forEach(function (input) {
+    [view.filter, view.low, view.mid, view.high, view.pitch].forEach(function (input) {
       input.addEventListener('input', function () {
         if (engine.decks) applySettings(view, engine.decks[view.id]);
       });
     });
 
-    // Jog wheel: dragging the platter nudges the deck faster or slower while
-    // the finger is down — the tool for riding a beat into phase by ear.
+    // Jog wheel, two gestures like a real deck:
+    //   · drag the hub  = scratch (grains follow the finger, both directions)
+    //   · drag the rim  = pitch bend, for riding a beat into phase by ear
     var jog = null;
 
     view.platter.style.touchAction = 'none';
@@ -304,21 +386,64 @@
     view.platter.addEventListener('pointerdown', function (event) {
       if (!view.track) return;
       var deck = engine.decks ? engine.decks[view.id] : null;
-      if (!deck || !deck.playing) return;
-      jog = { startX: event.clientX, deck: deck };
+      if (!deck) return;
+
+      var rect = view.platter.getBoundingClientRect();
+      var cx = rect.left + rect.width / 2;
+      var cy = rect.top + rect.height / 2;
+      var dist = Math.sqrt(Math.pow(event.clientX - cx, 2) + Math.pow(event.clientY - cy, 2));
+      var onHub = dist < rect.width * 0.34;
+
+      if (onHub && deck.buffer) {
+        // Grabbing the record stops it dead in its tracks and lets the finger
+        // play it — mute-free, so the scratch is audible.
+        jog = {
+          mode: 'scratch',
+          startX: event.clientX,
+          lastX: event.clientX,
+          lastT: performance.now(),
+          deck: deck
+        };
+        deck.scratchStart();
+      } else {
+        jog = { mode: 'bend', startX: event.clientX, deck: deck };
+      }
       try { view.platter.setPointerCapture(event.pointerId); } catch (err) { /* older browsers */ }
     });
 
     view.platter.addEventListener('pointermove', function (event) {
       if (!jog) return;
-      var dx = event.clientX - jog.startX;
-      jog.deck.setBend(window.AuxRush.clamp(dx * 0.35, -30, 30));
+
+      if (jog.mode == "bend") {
+        var dx = event.clientX - jog.startX;
+        jog.deck.setBend(window.AuxRush.clamp(dx * 0.35, -30, 30));
+        return;
+      }
+
+      var step = event.clientX - jog.lastX;
+      if (Math.abs(step) < 2) return;
+
+      var now = performance.now();
+      var speed = Math.abs(step) / Math.max(8, now - jog.lastT) * 12;
+      // 1 px of drag ≈ 5 ms of audio; faster drags pitch the grain up.
+      jog.deck.scratchMove(step * 0.005, window.AuxRush.clamp(speed, 0.7, 2.6));
+      jog.lastX = event.clientX;
+      jog.lastT = now;
+      view.needsRedraw = true;
     });
 
     function endJog() {
       if (!jog) return;
-      jog.deck.setBend(0);
+      if (jog.mode === 'bend') {
+        jog.deck.setBend(0);
+      } else {
+        jog.deck.scratchEnd();
+        if (!jog.deck.playing) {
+          view.pausedPos = jog.deck.pausedPos;
+        }
+      }
       jog = null;
+      view.needsRedraw = true;
     }
 
     view.platter.addEventListener('pointerup', endJog);
@@ -384,6 +509,7 @@
     } else {
       view.track.cues[index] = snapToBeat(deck, deck.position());
       updateCueButtons(view);
+      saveCues(view.track);
       toast('Cue ' + (index + 1) + ' set');
     }
   }
@@ -723,6 +849,9 @@
       del.addEventListener('click', function () {
         var index = tracks.indexOf(track);
         if (index >= 0) tracks.splice(index, 1);
+        idbDel('audio', String(track.id)).catch(function () {});
+        delete cueMap[cueKey(track)];
+        idbPut('state', 'cueMap', cueMap).catch(function () {});
         renderLibrary();
       });
       actions.appendChild(del);
@@ -878,7 +1007,7 @@
 
       window.AuxRush.renderDemo(groove, 24).then(function (buffer) {
         var analysis = window.AuxRush.analyzeBuffer(buffer);
-        tracks.push({
+        var track = {
           id: nextId++,
           title: groove.title,
           artist: groove.artist,
@@ -892,7 +1021,11 @@
           mixOut: analysis.mixOut,
           cues: [null, null, null, null],
           imported: false
-        });
+        };
+        // Built-in grooves are regenerated each boot; their saved cues
+        // survive in the cue map, keyed by title.
+        applySavedCues(track);
+        tracks.push(track);
         index++;
         renderLibrary();
         // Idempotent: fills any deck that still has no track, whatever order
@@ -942,7 +1075,7 @@
         var artist = parts.length > 1 ? parts[0] : 'Imported';
         var title = parts.length > 1 ? parts.slice(1).join(' - ') : base;
 
-        tracks.push({
+        var track = {
           id: nextId++,
           title: title,
           artist: artist,
@@ -956,7 +1089,23 @@
           mixOut: analysis.mixOut,
           cues: [null, null, null, null],
           imported: true
-        });
+        };
+        tracks.push(track);
+
+        // Persist the import: blob + analysis + cues, keyed by track id.
+        idbPut('audio', String(track.id), {
+          blob: file,
+          title: title,
+          artist: artist,
+          bpm: track.bpm,
+          duration: track.duration,
+          key: track.key,
+          energy: track.energy,
+          mixIn: track.mixIn,
+          mixOut: track.mixOut,
+          cues: track.cues,
+          peaks: track.peaks
+        }).catch(function () {});
 
         index++;
         renderLibrary();
@@ -970,6 +1119,292 @@
     }
 
     next();
+  }
+
+  // ------------------------------------------------------- persistence
+  //
+  //  One IndexedDB database ("auxrush"), three stores:
+  //   · "audio" — imported files (Blob) + analysis metadata, keyed by track id
+  //   · "recs"  — recorded sets (blob + name + size), keyed by timestamp
+  //  · "state"  — small state: the cue map for every track
+  //
+  //  Built-in grooves are regenerated every boot, but their cues survive
+  //  (keyed by title). Imports restore instantly as metadata and decode
+  //  lazily — the audio only decodes when a deck first needs it, because a
+  //  decoded stereo minute of PCM is ~10 MB.
+
+  var idb = null;
+  var cueMap = {};
+  var decodeInflight = {};
+
+  function idbOpen() {
+    if (idb) return Promise.resolve(idb);
+    return new Promise(function (resolve, reject) {
+      if (!window.indexedDB) { reject(new Error('no indexedDB')); return; }
+      var req = window.indexedDB.open('auxrush', 1);
+      req.onupgradeneeded = function (event) {
+        var db = event.target.result;
+        if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio');
+        if (!db.objectStoreNames.contains('recs')) db.createObjectStore('recs');
+        if (!db.objectStoreNames.contains('state')) db.createObjectStore('state');
+      };
+      req.onsuccess = function () { idb = req.result; resolve(idb); };
+      req.onerror = function () { reject(req.error || new Error('idb failed')); };
+    });
+  }
+
+  function idbPut(store, key, value) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put(value, key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function idbGet(store, key) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var req = db.transaction(store).objectStore(store).get(key);
+        req.onsuccess = function () { resolve(req.result || null); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function idbDel(store, key) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).delete(key);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function idbAll(store) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var out = [];
+        var req = db.transaction(store).objectStore(store).openCursor();
+        req.onsuccess = function (event) {
+          var cursor = event.target.result;
+          if (!cursor) { resolve(out); return; }
+          out.push({ key: cursor.key, value: cursor.value });
+          cursor.continue();
+        };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function cueKey(track) {
+    return track.imported ? 'i:' + track.id : 't:' + track.title;
+  }
+
+  function saveCues(track) {
+    cueMap[cueKey(track)] = track.cues;
+    idbPut('state', 'cueMap', cueMap).catch(function () {});
+  }
+
+  function applySavedCues(track) {
+    var saved = cueMap[cueKey(track)];
+    if (saved && track.cues.every(function (c) { return c == null; })) {
+      track.cues = saved.slice(0, 4);
+    }
+  }
+
+  /** Decodes a persisted import once, on first need; caches the promise. */
+  function ensureBuffer(track, cb) {
+    if (track.buffer) { cb(track.buffer); return; }
+    var inflight = decodeInflight[track.id];
+    if (inflight) { inflight.then(cb); return; }
+    if (!track.imported) { cb(null); return; }
+    var promise = idbGet('audio', String(track.id)).then(function (rec) {
+      if (!rec || !rec.blob) throw new Error('missing audio');
+      var ctx = engine.ensureContext();
+      return new Promise(function (resolve, reject) {
+        ctx.decodeAudioData(rec.blob.slice(0), resolve, reject);
+      });
+    }).then(function (buf) {
+      track.buffer = buf;
+      if (!track.peaks) track.peaks = window.AuxRush.analyzeBuffer(buf).peaks;
+      return buf;
+    });
+    decodeInflight[track.id] = promise;
+    promise.then(function () { cb(track.buffer); }, function () {
+      delete decodeInflight[track.id];
+      toast('Stored audio for "' + track.title + '" is gone — removing it');
+      removeTrack(track);
+    });
+  }
+
+  function removeTrack(track) {
+    var index = tracks.indexOf(track);
+    if (index >= 0) tracks.splice(index, 1);
+    ['a', 'b'].forEach(function (id) {
+      var view = views[id];
+      if (view.track !== track) return;
+      view.track = null;
+      view.needsLoad = false;
+      view.titleEl.textContent = 'No track loaded';
+      view.artistEl.textContent = 'Open the library to load a track';
+      view.panel.classList.remove('playing');
+      view.needsRedraw = true;
+    });
+    idbDel('audio', String(track.id)).catch(function () {});
+    delete cueMap[cueKey(track)];
+    idbPut('state', 'cueMap', cueMap).catch(function () {});
+    renderLibrary();
+  }
+
+  function bootPersistence() {
+    idbOpen().then(function () {
+      return idbGet('state', 'cueMap').then(function (m) {
+        cueMap = m || {};
+        // Built-in grooves may already be generated; restore their cues.
+        tracks.forEach(function (t) {
+          if (!t.imported) applySavedCues(t);
+        });
+        updateCueButtons(views.a);
+        updateCueButtons(views.b);
+      });
+    }).then(function () {
+      return idbAll('audio');
+    }).then(function (recs) {
+      recs.forEach(function (r) {
+        var meta = r.value || {};
+        if (!meta.blob) return;
+        var track = {
+          id: parseInt(r.key, 10),
+          title: meta.title || 'Imported',
+          artist: meta.artist || 'Imported',
+          bpm: meta.bpm || 0,
+          duration: meta.duration || 0,
+          key: meta.key || null,
+          energy: meta.energy,
+          mixIn: meta.mixIn,
+          mixOut: meta.mixOut,
+          cues: (meta.cues || []).slice(0, 4),
+          peaks: meta.peaks || null,
+          imported: true,
+          buffer: null
+        };
+        while (track.cues.length < 4) track.cues.push(null);
+        tracks.push(track);
+      });
+      nextId = tracks.reduce(function (m, t) { return Math.max(m, t.id); }, 0) + 1;
+      renderLibrary();
+      return idbAll('recs');
+    }).then(function (recs) {
+      recs.forEach(function (r) {
+        var meta = r.value || {};
+        if (!meta.blob) return;
+        recordings.push({
+          url: URL.createObjectURL(meta.blob),
+          name: meta.name || String(r.key),
+          size: meta.size || meta.blob.size,
+          key: r.key
+        });
+      });
+      renderRecordings();
+      autoLoadStarters();
+    }).catch(function () {
+      /* persistence unavailable — session-only mode */
+    });
+  }
+
+  // ------------------------------------------------------- sampler pads
+  //
+  //  Eight synthesized one-shots (air horn, siren, laser, riser, crash,
+  //  stab, bell, blip) rendered offline on first open, fired over the
+  //  master. Holding SIREN/RISER re-fires them at an eighth-note rate.
+
+  var padBuffers = {};
+  var padsLoading = false;
+  var padRepeat = null;
+
+  function setupPads() {
+    var open = document.getElementById('padsBtn');
+    var close = document.getElementById('padsClose');
+    if (open) open.addEventListener('click', togglePads);
+    if (close) close.addEventListener('click', togglePads);
+  }
+
+  function togglePads() {
+    var tray = document.getElementById('padTray');
+    if (!tray) return;
+    tray.classList.toggle('hidden');
+    if (!tray.classList.contains('hidden')) ensurePads();
+  }
+
+  function ensurePads() {
+    var grid = document.getElementById('padGrid');
+    if (!grid || !window.AuxRush.renderPads) return;
+    if (Object.keys(padBuffers).length) return;
+    if (padsLoading) return;
+    padsLoading = true;
+    grid.innerHTML = '<div class="lib-empty">Rendering pads…</div>';
+    window.AuxRush.renderPads().then(function (map) {
+      padBuffers = map;
+      buildPadGrid();
+    }).catch(function () {
+      padsLoading = false;
+      grid.innerHTML = '<div class="lib-empty">Could not render pads</div>';
+    });
+  }
+
+  function buildPadGrid() {
+    var grid = document.getElementById('padGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    var names = window.AuxRush.PAD_NAMES || [];
+    names.forEach(function (kind, index) {
+      var btn = document.createElement('button');
+      btn.className = 'pad';
+      btn.style.setProperty('--pad-hue', String((index * 45) % 360));
+      btn.textContent = kind;
+      btn.addEventListener('pointerdown', function (event) {
+        event.preventDefault();
+        padDown(kind, btn);
+        try { btn.setPointerCapture(event.pointerId); } catch (err) { /* older browsers */ }
+      });
+      btn.addEventListener('pointerup', padUp);
+      btn.addEventListener('pointercancel', padUp);
+      grid.appendChild(btn);
+    });
+  }
+
+  function padRepeatInterval() {
+    // Eighth notes of the fastest playing deck; plain 300 ms when silent.
+    var beat = 0;
+    ['a', 'b'].forEach(function (id) {
+      var deck = engine.decks ? engine.decks[id] : null;
+      if (deck && deck.playing && deck.bpm) {
+        beat = 60 / (deck.bpm * deck.rate);
+      }
+    });
+    return beat > 0 ? (beat / 2) * 1000 : 300;
+  }
+
+  function padDown(kind, btn) {
+    engine.ensureContext();
+    var fire = function () { engine.playPad(padBuffers[kind]); };
+    fire();
+    btn.classList.add('hit');
+    if (kind === 'SIREN' || kind === 'RISER') {
+      padRepeat = setInterval(fire, padRepeatInterval());
+    }
+  }
+
+  function padUp() {
+    if (padRepeat) {
+      clearInterval(padRepeat);
+      padRepeat = null;
+    }
   }
 
   // ---------------------------------------------------------- sheet + hours
@@ -1018,6 +1453,7 @@
         var idx = recordings.indexOf(rec);
         if (idx >= 0) recordings.splice(idx, 1);
         try { URL.revokeObjectURL(rec.url); } catch (err) { /* already gone */ }
+        if (rec.key) idbDel('recs', rec.key).catch(function () {});
         renderRecordings();
       });
       row.appendChild(del);
@@ -1108,7 +1544,7 @@
 
     var a = engine.decks ? engine.decks.a : null;
     var b = engine.decks ? engine.decks.b : null;
-    if (!a || !b || !a.playing || !b.playing || !a.bpm || !b.bpm) {
+    if (!a || !b || !a.playing || !b.playing || a.slipHeld || b.slipHeld || !a.bpm || !b.bpm) {
       el.textContent = '—';
       el.className = 'beat-sync-state';
       return;
@@ -1145,8 +1581,15 @@
         recordings.unshift({
           url: URL.createObjectURL(blob),
           name: 'Mix ' + new Date().toLocaleString(),
-          size: blob.size
+          size: blob.size,
+          key: 'rec ' + Date.now()
         });
+        // Persist the recording so it survives a reload.
+        idbPut('recs', recordings[0].key, {
+          blob: blob,
+          name: recordings[0].name,
+          size: blob.size
+        }).catch(function () {});
         renderRecordings();
         toast('Recording saved · download it in the library');
       });
@@ -1298,9 +1741,21 @@
     ['a', 'b'].forEach(function (id) {
       var view = views[id];
       var deck = engine.decks[id];
-      if (view.track && (!deck.buffer || deck.trackId !== view.track.id)) {
+      if (!view.track || deck.trackId === view.track.id) return;
+      if (view.track.buffer) {
         deck.loadTrack(view.track);
         applySettings(view, deck);
+      } else if (view.track.imported && !view.track.loading) {
+        // Persisted import: decode once in the background, then load.
+        view.track.loading = true;
+        ensureBuffer(view.track, function () {
+          if (!view.track) return;
+          view.track.loading = false;
+          if (!deck.buffer || deck.trackId !== view.track.id) {
+            deck.loadTrack(view.track);
+            applySettings(view, deck);
+          }
+        });
       }
     });
   }
@@ -1518,7 +1973,7 @@
 
     // The outgoing deck is done: stop it and give its EQ back to the sliders
     // so whatever gets loaded there next starts clean.
-    mix.from.pause();
+    mix.from.stopNow();
     if (mix.from.loopBeats) {
       // Don't leave a stale loop armed on a deck the set has moved past.
       mix.from.setLoop(0);
@@ -1544,7 +1999,7 @@
 
     // The incoming track may still be waiting for its drop-in bar.
     if (engine.ctx && mix.to.startedAt > engine.ctx.currentTime) {
-      mix.to.pause();
+      mix.to.stopNow();
       mix.to.seek(0);
     }
 
@@ -1559,8 +2014,9 @@
 
     var a = engine.decks.a;
     var b = engine.decks.b;
-    var aPlaying = a.playing;
-    var bPlaying = b.playing;
+    // A slip-held deck is silent, so it must not count as the playing one.
+    var aPlaying = a.playing && !a.slipHeld;
+    var bPlaying = b.playing && !b.slipHeld;
 
     if (!aPlaying && !bPlaying) {
       startAutoSet();
@@ -1729,7 +2185,7 @@
     var deck = engine.decks ? engine.decks[view.id] : null;
     var track = view.track;
     var position = view.dragging ? view.dragPos : (deck ? deck.position() : 0);
-    var playing = deck ? deck.playing : false;
+    var playing = deck ? (deck.playing && !deck.slipHeld) : false;
     var duration = track ? track.duration : 0;
     // Before a deck's buffer is loaded into the engine its bpm is 0; the track
     // carries the analysed value, so fall back to it rather than showing "--".
@@ -1748,8 +2204,14 @@
     view.bpmEl.textContent = bpm > 0 ? bpm.toFixed(1) : '--';
     view.hubBpm.textContent = bpm > 0 ? String(Math.round(bpm)) : '--';
 
+    // Channel meters live in the centre strip; resolve them once per view.
+    if (!view.stripMeter) {
+      view.stripMeter = document.getElementById('meter' + view.id.toUpperCase());
+    }
     var level = deck ? deck.level() : 0;
-    view.meterFill.style.width = Math.round(level * 100) + '%';
+    if (view.stripMeter) {
+      view.stripMeter.style.width = Math.round(level * 100) + '%';
+    }
 
     // SYNC stays lit while this deck is riding a matched tempo.
     view.syncBtn.classList.toggle('on', !!deck && Math.abs(deck.rate - 1) > 0.001);
@@ -1799,10 +2261,12 @@
 
     setupMeter();
     setupStrip();
+    setupPads();
     setupLibrary();
     renderLibrary();
     renderRecordings();
     loadBuiltInTracks();
+    bootPersistence();
 
     requestAnimationFrame(frame);
   }
@@ -1817,6 +2281,13 @@
     youtubeId: youtubeId,
     clearVideos: function () { videos.length = 0; saveVideos(); renderLibrary(); },
     pickNext: function () { return pickNextTrack(null, null); },
+    pads: function () { return Object.keys(padBuffers); },
+    storage: {
+      put: idbPut,
+      get: idbGet,
+      del: idbDel,
+      all: idbAll
+    },
     status: function () {
       var a = engine.decks ? engine.decks.a : null;
       var b = engine.decks ? engine.decks.b : null;

@@ -16,6 +16,11 @@ CUE behaves like a CDJ: while playing, a press jumps back to the cue point and
 keeps going; while paused, holding plays a preview from the cue and releasing
 snaps back to it, paused.
 
+The platter has two gestures: **drag the hub to scratch** (grains follow your
+finger in both directions) and **drag the rim to pitch-bend** up to ±30% for
+riding a beat into phase. **SLIP** keeps the record running silently underneath
+a pause or a scratch, so the deck re-enters exactly where it would have been.
+
 ## Mixer
 
 Crossfader, master volume with a live LED meter, and set recording — the record

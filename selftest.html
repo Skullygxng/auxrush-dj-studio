@@ -347,9 +347,125 @@
       dA.bpm = 0; dB.bpm = 0;
       dA.duration = 0; dB.duration = 0;
       dA.pausedPos = 0; dB.pausedPos = 0;
+      check('slip toggle exists in the UI', document.querySelectorAll('.chip.slip').length === 2);
     } catch (err) {
       check('auto dj', false, err.message);
     }
+
+    // Slip (flux) and scratch: the two "pro hands" gestures.
+    try {
+      var deckA = window.AuxRushApp.engine.decks.a;
+      var deckB = window.AuxRushApp.engine.decks.b;
+
+      // Slip: pausing mutes the deck while the record keeps running underneath.
+      deckA.bpm = 124;
+      deckA.duration = 30;
+      deckA.pausedPos = 0;
+      deckA.playing = false;
+      deckA.setSlip(true);
+      check('slip flag sets', deckA.slip === true);
+
+      deckA.slipHeld = true;
+      deckA.slipStartCtx = window.AuxRushApp.engine.ctx.currentTime;
+      deckA.slipStartPos = 4;
+      deckA.applyVolume();
+      check('slip mutes the deck', deckA.volumeGain.gain.value === 0,
+        String(deckA.volumeGain.gain.value));
+
+      var virt = deckA.slipPosition();
+      check('slip keeps the record running underneath', virt >= 4, virt.toFixed(3));
+
+      deckA.slipHeld = false;
+      deckA.applyVolume();
+      check('slip unmutes on resume', deckA.volumeGain.gain.value > 0,
+        deckA.volumeGain.gain.value.toFixed(2));
+
+      deckA.slipHeld = true;
+      deckA.setSlip(false);
+      check('slip off becomes a real stop', deckA.playing === false && deckA.slipHeld === false);
+
+      // Scratch needs real audio, so it's checked in the late block below.
+      check('scratch API present', typeof deckB.scratchStart === 'function' &&
+        typeof deckB.scratchMove === 'function' && typeof deckB.scratchEnd === 'function');
+
+      deckB.duration = 0;
+      deckB.bpm = 0;
+      deckB.pausedPos = 0;
+      deckA.duration = 0;
+      deckA.bpm = 0;
+      deckA.pausedPos = 0;
+    } catch (err) {
+      check('slip/scratch', false, err.message);
+    }
+
+    // Scratch: grains follow the finger, both directions, on a real buffer.
+    window.AuxRush.renderDemo(window.AuxRush.DEMOS[0], 1).then(function (buffer) {
+      var deck = window.AuxRushApp.engine.decks.b;
+      deck.loadTrack({ id: 9001, buffer: buffer, duration: buffer.duration, bpm: 124, cues: [null, null, null, null] });
+
+      var grabbed = deck.scratchStart();
+      console.log((grabbed && deck.scratchActive ? 'LATE PASS' : 'LATE FAIL') +
+        ' scratch engages');
+
+      deck.scratchMove(0.1, 1.2);
+      console.log((Math.abs(deck.scratchPos - 0.1) < 0.02 ? 'LATE PASS' : 'LATE FAIL') +
+        ' scratch moves forward [' + deck.scratchPos.toFixed(3) + ']');
+
+      deck.scratchMove(-0.06, 1.2);
+      console.log((Math.abs(deck.scratchPos - 0.04) < 0.02 ? 'LATE PASS' : 'LATE FAIL') +
+        ' scratch runs backwards [' + deck.scratchPos.toFixed(3) + ']');
+
+      deck.scratchEnd();
+      console.log((!deck.scratchActive ? 'LATE PASS' : 'LATE FAIL') + ' scratch releases');
+    }).catch(function (err) {
+      console.log('LATE FAIL scratch [' + (err && err.message ? err.message : err) + ']');
+    });
+
+    try {
+      var padsBtn = document.getElementById('padsBtn');
+      if (!padsBtn) {
+        console.log('LATE INFO sampler tray skipped — this page has no pads button');
+      } else {
+        padsBtn.click();
+        check('sampler tray opens', !document.getElementById('padTray').classList.contains('hidden'));
+      }
+      setTimeout(function () {
+        var pads = document.querySelectorAll('#padGrid .pad').length;
+        console.log((pads === 8 ? 'LATE PASS' : 'LATE FAIL') + ' sampler pads rendered [' + pads + ']');
+        try {
+          var first = document.querySelector('#padGrid .pad');
+          if (first) {
+            first.dispatchEvent(new Event('pointerdown'));
+            first.dispatchEvent(new Event('pointerup'));
+            console.log('LATE PASS pad trigger fired without error');
+          } else {
+            console.log('LATE FAIL pad trigger skipped — no pads');
+          }
+        } catch (err) {
+          console.log('LATE FAIL pad trigger [' + err.message + ']');
+        }
+      }, 2500);
+    } catch (err) {
+      check('sampler tray', false, err.message);
+    }
+
+    setTimeout(function () {
+      window.AuxRushApp.storage.put('state', 'selftest', { ok: 1 }).then(function () {
+        return window.AuxRushApp.storage.get('state', 'selftest');
+      }).then(function (v) {
+        console.log((v && v.ok === 1 ? 'LATE PASS' : 'LATE FAIL') + ' idb round trip');
+      }).catch(function (err) {
+        console.log('LATE FAIL idb round trip [' + (err && err.message) + ']');
+      });
+      var blob = new Blob(['x'], { type: 'audio/mpeg' });
+      window.AuxRushApp.storage.put('audio', 'selftest-audio', { blob: blob, title: 't' }).then(function () {
+        return window.AuxRushApp.storage.get('audio', 'selftest-audio');
+      }).then(function (rec) {
+        console.log((rec && rec.blob && rec.blob.size === 1 ? 'LATE PASS' : 'LATE FAIL') + ' blob round trip');
+      }).catch(function (err) {
+        console.log('LATE FAIL blob round trip [' + (err && err.message) + ']');
+      });
+    }, 300);
 
     report();
 
