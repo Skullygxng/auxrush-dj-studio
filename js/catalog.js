@@ -130,3 +130,49 @@
     tracks: tracks
   };
 })();
+
+
+  // ------------------------------------------------------------- SoundCloud
+  //
+  //  SoundCloud's API needs registered OAuth credentials and most of its audio
+  //  is rights-managed, so nothing here streams a track into the mixer. What we
+  //  can do honestly is identify a link (public oEmbed metadata) and send you
+  //  to where it plays — or, when the artist enabled downloads, to the file you
+  //  can import and mix.
+
+  function soundCloudOEmbed(url) {
+    var endpoint = 'https://soundcloud.com/oembed?format=json&url=' + encodeURIComponent(url);
+    return fetch(endpoint).then(function (response) {
+      if (!response.ok) throw new Error('oEmbed ' + response.status);
+      return response.json();
+    }).then(function (data) {
+      return {
+        title: data.title || '',
+        artist: data.author_name || '',
+        artwork: data.thumbnail_url || ''
+      };
+    });
+  }
+
+  /** True for a SoundCloud track/playlist link. */
+  function isSoundCloudUrl(text) {
+    return /^(https?:\/\/)?(www\.|m\.)?soundcloud\.com\/[^\s]+$/i.test(String(text || '').trim());
+  }
+
+  /** Reads the metadata; falls back to the link's slug if oEmbed is blocked. */
+  function soundCloudInfo(url) {
+    var clean = String(url).trim().replace(/^http:/, 'https:');
+    if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
+
+    return soundCloudOEmbed(clean).catch(function () {
+      var slug = clean.replace(/[?#].*$/, '').split('/').pop() || 'SoundCloud track';
+      return {
+        title: slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }),
+        artist: (clean.split('/')[3] || 'SoundCloud'),
+        artwork: ''
+      };
+    });
+  }
+
+  window.AuxRushCatalog.soundCloudInfo = soundCloudInfo;
+  window.AuxRushCatalog.isSoundCloudUrl = isSoundCloudUrl;

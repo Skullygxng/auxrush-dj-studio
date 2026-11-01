@@ -454,6 +454,22 @@
       check('sampler tray', false, err.message);
     }
 
+    // SoundCloud: can the browser read oEmbed metadata for a link?
+    if (window.AuxRushCatalog && window.AuxRushCatalog.soundCloudInfo) {
+      var scLink = 'https://soundcloud.com/forss/flickermood';
+      check('soundcloud link recognised', window.AuxRushCatalog.isSoundCloudUrl(scLink) === true);
+      check('soundcloud rejects junk', window.AuxRushCatalog.isSoundCloudUrl('not a link') === false);
+
+      window.AuxRushCatalog.soundCloudInfo(scLink).then(function (info) {
+        console.log((info && info.title ? 'LATE PASS' : 'LATE FAIL') +
+          ' soundcloud metadata [' + (info ? info.title + ' — ' + info.artist : 'none') + ']');
+      }).catch(function (err) {
+        console.log('LATE FAIL soundcloud metadata [' + (err && err.message) + ']');
+      });
+    } else {
+      console.log('LATE FAIL soundcloud helper missing');
+    }
+
     // Free music shelf: real CC releases from the Internet Archive.
     if (window.AuxRushCatalog) {
       window.AuxRushCatalog.picks().then(function (items) {

@@ -810,6 +810,108 @@
   var freeGenre = 'Hip-hop';
   var freeSearchTimer = null;
 
+  // ------------------------------------------------------ SoundCloud shelf
+  var soundCloud = [];
+
+  function loadSoundCloud() {
+    try {
+      var raw = window.localStorage ? window.localStorage.getItem('auxrush.soundcloud') : null;
+      var list = raw ? JSON.parse(raw) : [];
+      soundCloud = Array.isArray(list) ? list : [];
+    } catch (err) {
+      soundCloud = [];
+    }
+  }
+
+  function saveSoundCloud() {
+    try {
+      window.localStorage.setItem('auxrush.soundcloud', JSON.stringify(soundCloud));
+    } catch (err) { /* private mode */ }
+  }
+
+  function renderSoundCloud() {
+    var list = document.getElementById('scList');
+    if (!list) return;
+    list.innerHTML = '';
+
+    soundCloud.forEach(function (item) {
+      var card = document.createElement('div');
+      card.className = 'sc-card';
+
+      var art = document.createElement('div');
+      art.className = 'sc-art';
+      if (item.artwork) art.style.backgroundImage = 'url(' + item.artwork + ')';
+
+      var meta = document.createElement('div');
+      meta.className = 'sc-meta';
+      var title = document.createElement('div');
+      title.className = 'sc-title';
+      title.textContent = item.title || 'SoundCloud track';
+      var sub = document.createElement('div');
+      sub.className = 'sc-sub';
+      sub.textContent = item.artist || 'SoundCloud';
+      meta.appendChild(title);
+      meta.appendChild(sub);
+
+      var open = document.createElement('a');
+      open.className = 'btn tiny';
+      open.href = item.url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.textContent = 'Open';
+
+      var del = document.createElement('button');
+      del.className = 'btn tiny ghost';
+      del.textContent = '✕';
+      del.addEventListener('click', function () {
+        var index = soundCloud.indexOf(item);
+        if (index >= 0) soundCloud.splice(index, 1);
+        saveSoundCloud();
+        renderSoundCloud();
+      });
+
+      card.appendChild(art);
+      card.appendChild(meta);
+      card.appendChild(open);
+      card.appendChild(del);
+      list.appendChild(card);
+    });
+  }
+
+  function addSoundCloud() {
+    var input = document.getElementById('scUrl');
+    var catalog = window.AuxRushCatalog;
+    if (!input || !catalog) return;
+
+    var url = input.value.trim();
+    if (!catalog.isSoundCloudUrl(url)) {
+      toast('That doesn’t look like a SoundCloud link');
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+    if (soundCloud.some(function (item) { return item.url === url; })) {
+      toast('Already in your SoundCloud list');
+      input.value = '';
+      return;
+    }
+
+    input.value = '';
+    toast('Reading SoundCloud link…');
+
+    catalog.soundCloudInfo(url).then(function (info) {
+      soundCloud.unshift({
+        url: url,
+        title: info.title,
+        artist: info.artist,
+        artwork: info.artwork
+      });
+      saveSoundCloud();
+      renderSoundCloud();
+      toast('Added ' + (info.title || 'SoundCloud track'));
+    });
+  }
+
   function freeGenreChips() {
     var wrap = document.getElementById('freeGenres');
     if (!wrap || wrap.childElementCount) return;
@@ -1255,6 +1357,17 @@
     if (url) {
       url.addEventListener('keydown', function (event) {
         if (event.key === 'Enter') addVideoFromInput();
+      });
+    }
+
+    loadSoundCloud();
+    renderSoundCloud();
+    var scAdd = document.getElementById('scAdd');
+    var scUrl = document.getElementById('scUrl');
+    if (scAdd) scAdd.addEventListener('click', addSoundCloud);
+    if (scUrl) {
+      scUrl.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') addSoundCloud();
       });
     }
   }

@@ -41,7 +41,11 @@ Three tabs:
 - **Free** — real artists under Creative Commons, pulled from the Internet Archive's
   netlabel collection (hip-hop/beats first, plus house, techno, funk, soul, reggae and
   drum & bass). Pick a genre or search, open a release, tap **Add** and it downloads,
-  analyses and joins the library — legally mixable, unlike commercial releases.
+  analyses and joins the library — legally mixable, unlike commercial releases. A
+  **SoundCloud** box sits alongside it: paste a track link and it keeps a card with the
+  real title, artist and artwork plus a link to where it plays. SoundCloud doesn't hand
+  its audio to a browser mixer, so if the artist enabled downloads, import the file with
+  `+ Import audio` and it mixes like any other track.
 - **Videos** — paste a YouTube link and it becomes a card with the real thumbnail and an
   embedded player. YouTube's player will not hand its audio to the mixer, so videos are
   for watching; they can't be crossfaded or recorded.
