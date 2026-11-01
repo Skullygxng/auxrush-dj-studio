@@ -28,12 +28,19 @@
     var winCount = Math.max(1, Math.floor(length / winFrames));
     var energy = new Float32Array(winCount);
     var peaks = new Float32Array(PEAK_COUNT);
-    // Tone per peak bucket: low-frequency share, for colored waveforms.
+    // Band envelopes per peak bucket (bass / mid / treble) for the
+    // frequency-coloured waveform every real DJ app draws.
+    var bandsLow = new Float32Array(PEAK_COUNT);
+    var bandsMid = new Float32Array(PEAK_COUNT);
+    var bandsHigh = new Float32Array(PEAK_COUNT);
+    // Tone per peak bucket: low-frequency share, for coloured waveforms.
     var tone = new Float32Array(PEAK_COUNT);
     var lowSum = new Float32Array(PEAK_COUNT);
     var totSum = new Float32Array(PEAK_COUNT);
     var lp = 0;
+    var midLp = 0;
     var aLow = 1 - Math.exp(-2 * Math.PI * 220 / sr);
+    var aMid = 1 - Math.exp(-2 * Math.PI * 3000 / sr);
     var i;
 
     for (i = 0; i < length; i++) {
@@ -42,9 +49,15 @@
         : Math.abs(ch0[i]);
 
       lp += (v - lp) * aLow;
+      var above = Math.max(0, v - lp);
+      midLp += (above - midLp) * aMid;
+      var highPart = Math.max(0, above - midLp);
 
       var pi = Math.min(PEAK_COUNT - 1, Math.floor(i * PEAK_COUNT / length));
       if (v > peaks[pi]) peaks[pi] = v;
+      if (lp > bandsLow[pi]) bandsLow[pi] = lp;
+      if (midLp > bandsMid[pi]) bandsMid[pi] = midLp;
+      if (highPart > bandsHigh[pi]) bandsHigh[pi] = highPart;
       lowSum[pi] += lp * lp;
       totSum[pi] += v * v;
 
@@ -58,7 +71,12 @@
     }
     if (peakMax > 0.001) {
       var scale = 0.95 / peakMax;
-      for (i = 0; i < PEAK_COUNT; i++) peaks[i] = peaks[i] * scale;
+      for (i = 0; i < PEAK_COUNT; i++) {
+        peaks[i] = peaks[i] * scale;
+        bandsLow[i] = clamp(bandsLow[i] * scale, 0, 1);
+        bandsMid[i] = clamp(bandsMid[i] * scale, 0, 1);
+        bandsHigh[i] = clamp(bandsHigh[i] * scale, 0, 1);
+      }
     }
     for (i = 0; i < PEAK_COUNT; i++) {
       tone[i] = totSum[i] > 1e-9 ? clamp(lowSum[i] / totSum[i], 0, 1) : 0.5;
@@ -107,6 +125,9 @@
       bpm: bpm,
       peaks: peaks,
       tone: tone,
+      bandsLow: bandsLow,
+      bandsMid: bandsMid,
+      bandsHigh: bandsHigh,
       duration: length / sr,
       key: key,
       energy: structure.energy,

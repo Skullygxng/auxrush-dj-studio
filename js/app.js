@@ -1015,6 +1015,9 @@
           duration: buffer.duration,
           buffer: buffer,
           peaks: analysis.peaks,
+          bandsLow: analysis.bandsLow,
+          bandsMid: analysis.bandsMid,
+          bandsHigh: analysis.bandsHigh,
           key: analysis.key,
           energy: analysis.energy,
           mixIn: analysis.mixIn,
@@ -1083,6 +1086,9 @@
           duration: buffer.duration,
           buffer: buffer,
           peaks: analysis.peaks,
+          bandsLow: analysis.bandsLow,
+          bandsMid: analysis.bandsMid,
+          bandsHigh: analysis.bandsHigh,
           key: analysis.key,
           energy: analysis.energy,
           mixIn: analysis.mixIn,
@@ -1104,7 +1110,10 @@
           mixIn: track.mixIn,
           mixOut: track.mixOut,
           cues: track.cues,
-          peaks: track.peaks
+          peaks: track.peaks,
+          bandsLow: track.bandsLow || null,
+          bandsMid: track.bandsMid || null,
+          bandsHigh: track.bandsHigh || null
         }).catch(function () {});
 
         index++;
@@ -1290,6 +1299,9 @@
           mixOut: meta.mixOut,
           cues: (meta.cues || []).slice(0, 4),
           peaks: meta.peaks || null,
+          bandsLow: meta.bandsLow || null,
+          bandsMid: meta.bandsMid || null,
+          bandsHigh: meta.bandsHigh || null,
           imported: true,
           buffer: null
         };
@@ -2138,18 +2150,51 @@
       }
     }
 
+    var lowBand = track.bandsLow || null;
+    var midBand = track.bandsMid || null;
+    var highBand = track.bandsHigh || null;
+
+    // Serato-style colour bands stacked inside a mirrored envelope:
+    // red bass in the core, green mids around it, blue treble at the edge.
+    var C_LOW = '#e03131';
+    var C_MID = '#3fbf5a';
+    var C_HIGH = '#2f7ce0';
+
     for (var x = 0; x < cssW; x += 2) {
       var t = pos + (x - centerX) / pxPerSec;
       if (t < 0 || t > duration) continue;
       var index = Math.floor(t / duration * peaks.length);
       if (index < 0) index = 0;
       if (index >= peaks.length) index = peaks.length - 1;
+
       var value = peaks[index] || 0;
-      var barHeight = value * mid * 0.92;
-      if (barHeight < 0.5) continue;
-      g.fillStyle = x < centerX ? accent : accent + '60';
-      g.fillRect(x, mid - barHeight, 1.6, barHeight * 2);
+      var total = value * mid * 0.92;
+      if (total < 0.6) continue;
+
+      g.globalAlpha = x < centerX ? 1 : 0.42;
+
+      var lo = lowBand ? (lowBand[index] || 0) : value * 0.7;
+      var mi = midBand ? (midBand[index] || 0) : value * 0.22;
+      var hi = highBand ? (highBand[index] || 0) : value * 0.12;
+      var sum = lo + mi + hi;
+      var scale = sum > 1e-4 ? total / sum : 0;
+
+      var hLow = lo * scale;
+      var hMid = mi * scale;
+      var hHigh = hi * scale;
+
+      g.fillStyle = C_LOW;
+      g.fillRect(x, mid - hLow, 1.6, hLow * 2);
+
+      g.fillStyle = C_MID;
+      g.fillRect(x, mid - hLow - hMid, 1.6, hMid);
+      g.fillRect(x, mid + hLow, 1.6, hMid);
+
+      g.fillStyle = C_HIGH;
+      g.fillRect(x, mid - hLow - hMid - hHigh, 1.6, hHigh);
+      g.fillRect(x, mid + hLow + hMid, 1.6, hHigh);
     }
+    g.globalAlpha = 1;
 
     if (track.bpm > 0) {
       var beat = 60 / track.bpm;
@@ -2159,22 +2204,28 @@
         var beatX = centerX + (beatIndex * beat - pos) * pxPerSec;
         if (beatX > cssW) break;
         if (beatX >= 0) {
-          g.fillStyle = 'rgba(255,255,255,' + (beatIndex % 4 === 0 ? 0.2 : 0.07) + ')';
-          g.fillRect(beatX, 0, 1, cssH);
+          var isBar = beatIndex % 4 === 0;
+          g.fillStyle = 'rgba(255,255,255,' + (isBar ? 0.22 : 0.07) + ')';
+          g.fillRect(beatX, 0, isBar ? 1.4 : 1, cssH);
+          if (isBar) {
+            g.fillStyle = 'rgba(255,255,255,0.5)';
+            g.font = 'bold 8px -apple-system, system-ui, sans-serif';
+            g.fillText(String(Math.floor(beatIndex / 4) + 1), beatX + 2, 9);
+          }
         }
       }
     }
 
+    // Cue flags, coloured like the hot-cue pads.
+    var CUE_COLORS = ['#2f9bff', '#d9a441', '#3fbf5a', '#e03131'];
     var cues = track.cues || [];
     for (var c = 0; c < cues.length; c++) {
       if (cues[c] == null) continue;
       var cueX = centerX + (cues[c] - pos) * pxPerSec;
       if (cueX < 0 || cueX > cssW) continue;
-      g.fillStyle = 'rgba(255,255,255,0.75)';
+      g.fillStyle = CUE_COLORS[c % CUE_COLORS.length];
       g.fillRect(cueX - 0.75, 0, 1.5, cssH);
-      g.fillStyle = '#ffffff';
-      g.font = 'bold 9px -apple-system, system-ui, sans-serif';
-      g.fillText(String(c + 1), cueX + 3, 11);
+      g.fillRect(cueX - 4, 0, 8, 7);
     }
 
     g.fillStyle = '#ffffff';

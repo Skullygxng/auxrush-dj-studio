@@ -189,6 +189,10 @@
       check('energy measured', typeof analysis.energy === 'number' && analysis.energy > 0.05,
         String(analysis.energy));
       check('outro found', analysis.mixOut > 0, 'mixOut=' + analysis.mixOut.toFixed(1));
+    check('waveform band data', !!(analysis.bandsLow && analysis.bandsMid && analysis.bandsHigh),
+      analysis.bandsLow ? 'bass/mid/treble' : 'missing');
+    var bodyBg = getComputedStyle(document.body).backgroundColor;
+    check('console palette applied', bodyBg === 'rgb(16, 16, 19)', bodyBg);
     } catch (err) {
       check('analysis', false, err.message);
     }
