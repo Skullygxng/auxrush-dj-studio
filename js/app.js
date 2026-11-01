@@ -849,7 +849,7 @@
       title.textContent = item.title || 'SoundCloud track';
       var sub = document.createElement('div');
       sub.className = 'sc-sub';
-      sub.textContent = item.artist || 'SoundCloud';
+      sub.textContent = (item.provider ? item.provider + ' · ' : '') + (item.artist || '');
       meta.appendChild(title);
       meta.appendChild(sub);
 
@@ -884,31 +884,39 @@
     if (!input || !catalog) return;
 
     var url = input.value.trim();
-    if (!catalog.isSoundCloudUrl(url)) {
-      toast('That doesn’t look like a SoundCloud link');
+    var isSoundCloud = catalog.isSoundCloudUrl(url);
+    var onSpotify = catalog.isSpotifyUrl(url);
+
+    if (!isSoundCloud && !isSpotify) {
+      toast('Paste a SoundCloud or Spotify track link');
       return;
     }
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
 
     if (soundCloud.some(function (item) { return item.url === url; })) {
-      toast('Already in your SoundCloud list');
+      toast('Already in your links');
       input.value = '';
       return;
     }
 
     input.value = '';
-    toast('Reading SoundCloud link…');
+    toast('Reading link…');
 
-    catalog.soundCloudInfo(url).then(function (info) {
+    var request = onSpotify
+      ? catalog.spotifyInfo(url)
+      : catalog.soundCloudInfo(url);
+
+    request.then(function (info) {
       soundCloud.unshift({
         url: url,
+        provider: onSpotify ? 'Spotify' : 'SoundCloud',
         title: info.title,
         artist: info.artist,
         artwork: info.artwork
       });
       saveSoundCloud();
       renderSoundCloud();
-      toast('Added ' + (info.title || 'SoundCloud track'));
+      toast('Added ' + (info.title || 'link'));
     });
   }
 

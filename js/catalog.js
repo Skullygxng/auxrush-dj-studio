@@ -176,3 +176,41 @@
 
   window.AuxRushCatalog.soundCloudInfo = soundCloudInfo;
   window.AuxRushCatalog.isSoundCloudUrl = isSoundCloudUrl;
+
+  // ----------------------------------------------------------------- Spotify
+  //
+  //  A Spotify account licenses personal listening inside Spotify's own apps,
+  //  not playback through another application, and its audio is DRM-locked
+  //  away from Web Audio. So a link is catalogued here — title and artwork via
+  //  public oEmbed — and plays where it is licensed to.
+
+  function isSpotifyUrl(text) {
+    return /^(https?:\/\/)?(open\.)?spotify\.com\/[^\s]+$/i.test(String(text || '').trim());
+  }
+
+  function spotifyInfo(url) {
+    var clean = String(url).trim();
+    if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
+
+    var endpoint = 'https://open.spotify.com/oembed?url=' + encodeURIComponent(clean);
+    return fetch(endpoint).then(function (response) {
+      if (!response.ok) throw new Error('oEmbed ' + response.status);
+      return response.json();
+    }).then(function (data) {
+      return {
+        title: data.title || '',
+        artist: 'Spotify',
+        artwork: data.thumbnail_url || ''
+      };
+    }).catch(function () {
+      var id = (clean.split('/').pop() || '').split('?')[0];
+      return {
+        title: 'Spotify track' + (id ? ' ' + id.slice(0, 8) : ''),
+        artist: 'Spotify',
+        artwork: ''
+      };
+    });
+  }
+
+  window.AuxRushCatalog.isSpotifyUrl = isSpotifyUrl;
+  window.AuxRushCatalog.spotifyInfo = spotifyInfo;

@@ -459,6 +459,16 @@
       var scLink = 'https://soundcloud.com/forss/flickermood';
       check('soundcloud link recognised', window.AuxRushCatalog.isSoundCloudUrl(scLink) === true);
       check('soundcloud rejects junk', window.AuxRushCatalog.isSoundCloudUrl('not a link') === false);
+      check('spotify link recognised',
+        window.AuxRushCatalog.isSpotifyUrl('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT') === true);
+      check('spotify rejects junk', window.AuxRushCatalog.isSpotifyUrl('not a link') === false);
+
+      window.AuxRushCatalog.spotifyInfo('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT').then(function (info) {
+        console.log((info && info.title ? 'LATE PASS' : 'LATE FAIL') +
+          ' spotify metadata [' + (info ? info.title : 'none') + ']');
+      }).catch(function (err) {
+        console.log('LATE FAIL spotify metadata [' + (err && err.message) + ']');
+      });
 
       window.AuxRushCatalog.soundCloudInfo(scLink).then(function (info) {
         console.log((info && info.title ? 'LATE PASS' : 'LATE FAIL') +
