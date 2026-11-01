@@ -1469,3 +1469,103 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .pad { border-radius: 3px; background: var(--panel-2); border: 1px solid var(--line); }
+
+
+/* ---------- free music shelf ---------- */
+
+.free-pane { display: flex; flex-direction: column; gap: 10px; }
+
+.free-genres { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.free-genre {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.free-note {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--a);
+  border-radius: 2px;
+  padding: 7px 8px;
+}
+
+.free-results { display: flex; flex-direction: column; gap: 5px; }
+
+.free-item {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.free-item-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.free-item-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+.free-item-title {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.free-item-sub { font-size: 9px; color: var(--muted); }
+
+.free-item-tag {
+  flex: none;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--a);
+}
+
+.free-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  background: var(--well);
+}
+
+.free-track {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.free-track-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+.free-track-title {
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.free-track-sub { font-size: 8px; color: var(--muted); }
+
+.free-track .btn.tiny { flex: 0 0 auto; min-width: 44px; }

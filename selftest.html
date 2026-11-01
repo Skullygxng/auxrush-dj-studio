@@ -88,6 +88,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="js/engine.js"></script>
+<script src="js/catalog.js"></script>
 <script src="js/app.js"></script>
 <script>
 (function () {
@@ -451,6 +452,39 @@
       }, 2500);
     } catch (err) {
       check('sampler tray', false, err.message);
+    }
+
+    // Free music shelf: real CC releases from the Internet Archive.
+    if (window.AuxRushCatalog) {
+      window.AuxRushCatalog.picks().then(function (items) {
+        console.log((items.length >= 3 ? 'LATE PASS' : 'LATE FAIL') +
+          ' free catalogue picks [' + items.length + ']');
+      }).catch(function (err) {
+        console.log('LATE FAIL free catalogue picks [' + (err && err.message) + ']');
+      });
+
+      window.AuxRushCatalog.tracks('DWK060').then(function (list) {
+        var first = list[0];
+        console.log((list.length > 0 && first && /\.mp3$/i.test(first.url) ? 'LATE PASS' : 'LATE FAIL') +
+          ' free track resolves [' + (first ? first.artist + ' — ' + first.title : 'none') + ']');
+
+        // Can the browser actually pull the audio bytes? Check the response,
+        // then cancel the body so the test doesn't download 39 MB.
+        if (!first) return null;
+        return fetch(first.url).then(function (response) {
+          console.log((response.ok ? 'LATE PASS' : 'LATE FAIL') +
+            ' free audio fetchable [' + response.status + ']');
+          if (response.body && response.body.cancel) {
+            response.body.cancel().catch(function () {});
+          }
+        }).catch(function (err) {
+          console.log('LATE FAIL free audio blocked [' + (err && err.message) + ']');
+        });
+      }).catch(function (err) {
+        console.log('LATE FAIL free track resolve [' + (err && err.message) + ']');
+      });
+    } else {
+      console.log('LATE FAIL free catalogue missing');
     }
 
     setTimeout(function () {

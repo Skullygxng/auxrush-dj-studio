@@ -132,9 +132,20 @@
     <div class="lib-tools">
       <div class="lib-tabs">
         <button id="tabMix" class="lib-tab active">Mix</button>
+        <button id="tabFree" class="lib-tab">Free</button>
         <button id="tabVideos" class="lib-tab">Videos</button>
       </div>
       <input id="libSearch" class="lib-search" type="search" placeholder="Search title, artist, key" aria-label="Search library">
+    </div>
+
+    <div id="freePane" class="free-pane hidden">
+      <div class="free-genres" id="freeGenres"></div>
+      <div class="free-note">
+        Creative Commons releases from real artists via the Internet Archive — free to
+        download and mix. Commercial releases aren't licensed for that; import your own
+        copy if you have one.
+      </div>
+      <div id="freeResults" class="free-results"></div>
     </div>
 
     <div id="videoPane" class="video-pane hidden">
@@ -167,6 +178,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="js/engine.js"></script>
+<script src="js/catalog.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

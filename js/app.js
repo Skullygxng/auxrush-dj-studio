@@ -771,16 +771,280 @@
   function switchTab(tab) {
     libTab = tab;
     var tabMix = document.getElementById('tabMix');
+    var tabFree = document.getElementById('tabFree');
     var tabVideos = document.getElementById('tabVideos');
     var addRow = document.getElementById('addVideoRow');
+    var videoPane = document.getElementById('videoPane');
+    var freePane = document.getElementById('freePane');
     var search = document.getElementById('libSearch');
 
     if (tabMix) tabMix.classList.toggle('active', tab === 'mix');
+    if (tabFree) tabFree.classList.toggle('active', tab === 'free');
     if (tabVideos) tabVideos.classList.toggle('active', tab === 'videos');
     if (addRow) addRow.classList.toggle('hidden', tab !== 'videos');
-    if (search) search.placeholder = tab === 'videos' ? 'Search your videos' : 'Search title, artist, key';
+    if (videoPane && tab !== 'videos') videoPane.classList.add('hidden');
+    if (freePane) freePane.classList.toggle('hidden', tab !== 'free');
+
+    if (search) {
+      search.placeholder = tab === 'videos'
+        ? 'Search your videos'
+        : (tab === 'free' ? 'Search free music — genre, artist, mood' : 'Search title, artist, key');
+    }
+
     if (tab === 'mix') stopVideo();
+    if (tab === 'free') loadFreeMusic(search ? search.value : '');
     renderLibrary();
+  }
+
+  // ------------------------------------------------------- free music shelf
+  //
+  //  Creative Commons netlabel releases from the Internet Archive: real
+  //  artists, released free by their labels, downloadable and mixable. The
+  //  commercial catalogue (Fetty Wap and everything else on a major) is not
+  //  licensed for this, so it isn't fetched — import your own copy instead.
+
+  var freeItems = [];
+  var freeTracks = [];
+  var freeOpenId = null;
+  var freeBusy = false;
+  var freeGenre = 'Hip-hop';
+  var freeSearchTimer = null;
+
+  function freeGenreChips() {
+    var wrap = document.getElementById('freeGenres');
+    if (!wrap || wrap.childElementCount) return;
+    Object.keys(window.AuxRushCatalog.GENRES).forEach(function (label) {
+      var chip = document.createElement('button');
+      chip.className = 'chip free-genre' + (label === freeGenre ? ' active' : '');
+      chip.textContent = label;
+      chip.addEventListener('click', function () {
+        freeGenre = label;
+        Array.prototype.forEach.call(wrap.children, function (c) {
+          c.classList.toggle('active', c === chip);
+        });
+        loadFreeMusic('');
+      });
+      wrap.appendChild(chip);
+    });
+  }
+
+  function renderCatalog() {
+    var list = document.getElementById('freeResults');
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (freeBusy) {
+      list.appendChild(emptyTile('Searching the Internet Archive…'));
+      return;
+    }
+    if (!freeItems.length) {
+      list.appendChild(emptyTile('Nothing found — try another search or genre.'));
+      return;
+    }
+
+    freeItems.forEach(function (item) {
+      var card = document.createElement('div');
+      card.className = 'free-item';
+
+      var head = document.createElement('button');
+      head.className = 'free-item-head';
+      head.type = 'button';
+
+      var meta = document.createElement('span');
+      meta.className = 'free-item-meta';
+      var title = document.createElement('span');
+      title.className = 'free-item-title';
+      title.textContent = item.title;
+      var sub = document.createElement('span');
+      sub.className = 'free-item-sub';
+      sub.textContent = item.creator + (item.year ? ' · ' + item.year : '');
+      meta.appendChild(title);
+      meta.appendChild(sub);
+
+      var tag = document.createElement('span');
+      tag.className = 'free-item-tag';
+      tag.textContent = freeOpenId === item.identifier ? 'HIDE' : 'TRACKS';
+
+      head.appendChild(meta);
+      head.appendChild(tag);
+      head.addEventListener('click', function () { toggleFreeItem(item); });
+      card.appendChild(head);
+
+      if (freeOpenId === item.identifier) {
+        var rows = document.createElement('div');
+        rows.className = 'free-tracks';
+        if (!freeTracks.length) {
+          rows.appendChild(emptyTile('Reading the release…'));
+        }
+        freeTracks.forEach(function (tr) {
+          var row = document.createElement('div');
+          row.className = 'free-track';
+
+          var info = document.createElement('span');
+          info.className = 'free-track-meta';
+          var name = document.createElement('span');
+          name.className = 'free-track-title';
+          name.textContent = tr.title;
+          var detail = document.createElement('span');
+          detail.className = 'free-track-sub';
+          detail.textContent = tr.artist + (tr.duration ? ' · ' + fmtTime(tr.duration) : '') +
+            (tr.licence ? ' · CC' : '');
+          info.appendChild(name);
+          info.appendChild(detail);
+
+          var add = document.createElement('button');
+          add.className = 'btn tiny accent';
+          add.textContent = 'Add';
+          add.addEventListener('click', function () { addCatalogTrack(tr, add); });
+
+          row.appendChild(info);
+          row.appendChild(add);
+          rows.appendChild(row);
+        });
+        card.appendChild(rows);
+      }
+
+      list.appendChild(card);
+    });
+  }
+
+  function loadFreeMusic(query) {
+    freeGenreChips();
+    var catalog = window.AuxRushCatalog;
+    if (!catalog) return;
+
+    freeBusy = true;
+    freeOpenId = null;
+    freeTracks = [];
+    renderCatalog();
+
+    var term = (query || '').trim();
+    var request = term
+      ? catalog.search(term, catalog.GENRES[freeGenre] || '')
+      : catalog.picks();
+
+    request.then(function (items) {
+      freeItems = items;
+      freeBusy = false;
+      renderCatalog();
+    }).catch(function () {
+      freeBusy = false;
+      freeItems = [];
+      renderCatalog();
+      toast('Could not reach the free music archive');
+    });
+  }
+
+  function toggleFreeItem(item) {
+    var catalog = window.AuxRushCatalog;
+    if (!catalog) return;
+
+    if (freeOpenId === item.identifier) {
+      freeOpenId = null;
+      freeTracks = [];
+      renderCatalog();
+      return;
+    }
+
+    freeOpenId = item.identifier;
+    freeTracks = [];
+    renderCatalog();
+
+    catalog.tracks(item.identifier).then(function (list) {
+      if (freeOpenId !== item.identifier) return;
+      freeTracks = list;
+      renderCatalog();
+    }).catch(function () {
+      toast('Could not read that release');
+    });
+  }
+
+  /** Download a CC track, decode it, analyse it, keep it in the library. */
+  function addCatalogTrack(source, button) {
+    var ctx;
+    try {
+      ctx = engine.ensureContext();
+    } catch (err) {
+      toast('Web Audio is not available here');
+      return;
+    }
+
+    if (button) {
+      button.textContent = '…';
+      button.disabled = true;
+    }
+
+    var sourceId = source.identifier + '/' + source.url.split('/').pop();
+    if (tracks.some(function (t) { return t.sourceId === sourceId; })) {
+      toast('Already in your library');
+      if (button) { button.textContent = 'Added'; }
+      return;
+    }
+
+    toast('Downloading ' + source.title + '…');
+
+    fetch(source.url).then(function (response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.blob();
+    }).then(function (blob) {
+      return blob.arrayBuffer().then(function (data) {
+        return new Promise(function (resolve, reject) {
+          ctx.decodeAudioData(data, resolve, reject);
+        }).then(function (buffer) {
+          return { buffer: buffer, blob: blob };
+        });
+      });
+    }).then(function (result) {
+      var analysis = window.AuxRush.analyzeBuffer(result.buffer);
+      var track = {
+        id: nextId++,
+        title: source.title,
+        artist: source.artist,
+        bpm: analysis.bpm,
+        duration: result.buffer.duration,
+        buffer: result.buffer,
+        peaks: analysis.peaks,
+        bandsLow: analysis.bandsLow,
+        bandsMid: analysis.bandsMid,
+        bandsHigh: analysis.bandsHigh,
+        key: analysis.key,
+        energy: analysis.energy,
+        mixIn: analysis.mixIn,
+        mixOut: analysis.mixOut,
+        cues: [null, null, null, null],
+        imported: true,
+        sourceId: sourceId,
+        licence: source.licence || ''
+      };
+      tracks.push(track);
+
+      idbPut('audio', String(track.id), {
+        blob: result.blob,
+        title: track.title,
+        artist: track.artist,
+        bpm: track.bpm,
+        duration: track.duration,
+        key: track.key,
+        energy: track.energy,
+        mixIn: track.mixIn,
+        mixOut: track.mixOut,
+        cues: track.cues,
+        peaks: track.peaks,
+        bandsLow: track.bandsLow || null,
+        bandsMid: track.bandsMid || null,
+        bandsHigh: track.bandsHigh || null
+      }).catch(function () {});
+
+      if (button) { button.textContent = 'Added'; }
+      renderLibrary();
+      toast('Added ' + track.title + ' · ' + Math.round(track.bpm) + ' BPM');
+    }).catch(function (err) {
+      if (button) {
+        button.textContent = 'Add';
+        button.disabled = false;
+      }
+      toast('Could not get that track' + (err && err.message ? ' (' + err.message + ')' : ''));
+    });
   }
 
   function emptyTile(text) {
@@ -968,16 +1232,22 @@
   function setupLibrary() {
     loadVideos();
     var tabMix = document.getElementById('tabMix');
+    var tabFree = document.getElementById('tabFree');
     var tabVideos = document.getElementById('tabVideos');
     var search = document.getElementById('libSearch');
     var addBtn = document.getElementById('addVideoBtn');
     var url = document.getElementById('videoUrl');
 
     if (tabMix) tabMix.addEventListener('click', function () { switchTab('mix'); });
+    if (tabFree) tabFree.addEventListener('click', function () { switchTab('free'); });
     if (tabVideos) tabVideos.addEventListener('click', function () { switchTab('videos'); });
     if (search) {
       search.addEventListener('input', function () {
         libQuery = search.value || '';
+        if (libTab === 'free') {
+          clearTimeout(freeSearchTimer);
+          freeSearchTimer = setTimeout(function () { loadFreeMusic(libQuery); }, 450);
+        }
         renderLibrary();
       });
     }

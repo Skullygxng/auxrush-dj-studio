@@ -33,14 +33,22 @@ lit on any deck riding a matched tempo.
 
 ## Library
 
-Two tabs:
+Three tabs:
 
 - **Mix** — the tracks that feed the decks: four built-in grooves synthesised in the
   browser at first launch, plus anything you import (`+ Import audio`). Every track is
   analysed for BPM, musical key on the Camelot wheel, energy and structure.
+- **Free** — real artists under Creative Commons, pulled from the Internet Archive's
+  netlabel collection (hip-hop/beats first, plus house, techno, funk, soul, reggae and
+  drum & bass). Pick a genre or search, open a release, tap **Add** and it downloads,
+  analyses and joins the library — legally mixable, unlike commercial releases.
 - **Videos** — paste a YouTube link and it becomes a card with the real thumbnail and an
   embedded player. YouTube's player will not hand its audio to the mixer, so videos are
   for watching; they can't be crossfaded or recorded.
+
+Commercial music (Fetty Wap and everything else on a major label) is not licensed for
+redistribution or ripping, so it isn't fetched anywhere in the app. If you own a copy,
+`+ Import audio` puts it on the decks with full BPM/key/waveform analysis.
 
 ## Auto DJ
 
